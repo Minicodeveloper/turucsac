@@ -1,0 +1,44 @@
+[
+    {
+        "id": "pos",
+        "title": "Nueva Venta",
+        "desc": "Despacho automático POS",
+        "icon": "point_of_sale",
+        "badge": null
+    },
+    {
+        "id": "inventario",
+        "title": "Ver Inventario",
+        "desc": "Consulta de stock crítico",
+        "icon": "inventory_2",
+        "badge": null
+    },
+    {
+        "id": "finanzas",
+        "title": "Rendir Cuentas",
+        "desc": "Cierre de turno actual",
+        "icon": "account_balance_wallet",
+        "badge": null
+    },
+    {
+        "id": "compras",
+        "title": "Abastecimiento",
+        "desc": "Ingreso de cisterna",
+        "icon": "local_shipping",
+        "badge": null
+    },
+    {
+        "id": "configuracion",
+        "title": "Configuración",
+        "desc": "Ajustes globales sistema",
+        "icon": "settings",
+        "badge": null
+    },
+    {
+        "id": "clientes",
+        "title": "Base Clientes",
+        "desc": "Gestión de facturación",
+        "icon": "groups",
+        "badge": null
+    }
+]

@@ -1,0 +1,8 @@
+RewriteEngine On
+
+# Si la petición es para /api, la mandamos al script php correspondiente (dejando que apache lo maneje)
+# O si prefieres, las rutas del frontend se redirigen al index.html
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{REQUEST_URI} !^/api/
+RewriteRule ^(.*)$ frontend/dist/index.html [L]

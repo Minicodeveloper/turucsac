@@ -1,0 +1,27 @@
+FROM php:8.1-apache
+
+# Habilitar mod_rewrite y cabeceras CORS de Apache
+RUN a2enmod rewrite headers
+
+# Instalar extensiones PDO MySQL
+RUN docker-php-ext-install pdo pdo_mysql
+
+# Cambiar el document root de apache para que apunte directamente a frontend/dist/
+ENV APACHE_DOCUMENT_ROOT /var/www/html/frontend/dist
+
+RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf
+RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf
+
+# Ajustar ServerName para evitar advertencias de Apache
+RUN echo "ServerName localhost" >> /etc/apache2/apache2.conf
+
+# Permitir anulación de configuración en Apache por .htaccess
+RUN sed -ri -e 's!AllowOverride None!AllowOverride All!g' /etc/apache2/apache2.conf
+
+# Crear un Alias en Apache para mapear las llamadas de /api/ al directorio /var/www/html/api/
+RUN echo "Alias /api /var/www/html/api" >> /etc/apache2/apache2.conf
+RUN echo "<Directory /var/www/html/api>" >> /etc/apache2/apache2.conf
+RUN echo "    Options Indexes FollowSymLinks" >> /etc/apache2/apache2.conf
+RUN echo "    AllowOverride All" >> /etc/apache2/apache2.conf
+RUN echo "    Require all granted" >> /etc/apache2/apache2.conf
+RUN echo "</Directory>" >> /etc/apache2/apache2.conf

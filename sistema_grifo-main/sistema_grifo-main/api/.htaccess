@@ -1,0 +1,4 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  # No hace falta redireccionar nada especial para la API ya que se accede a archivos directos como auth.php
+</IfModule>

@@ -1,0 +1,116 @@
+@import "tailwindcss";
+
+@theme {
+  /* Azure Logic: Active Neutrals Palette */
+  --color-surface: #F8F9FA;
+  --color-surface-container-lowest: #FFFFFF;
+  --color-surface-container-low: #F3F4F5;
+  --color-surface-container: #EDEEEF;
+  --color-surface-container-high: #E1E2E3;
+  --color-surface-container-highest: #D0D1D2;
+  
+  --color-primary: #00AEEF;
+  --color-primary-container: #00AEEF;
+  --color-on-primary-container: #FFFFFF;
+  --color-primary-navy: #0B1D2D;
+  
+  --color-secondary-fixed: #0B1D2D;
+  --color-on-secondary-fixed: #0B1D2D;
+  
+  --color-on-surface: #191C1D;
+  --color-on-surface-variant: #3E4850;
+  --color-outline-variant: #BDC8D1;
+  --color-error: #BA1A1A;
+}
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
+
+@layer base {
+  body {
+    background-color: var(--color-surface);
+    color: var(--color-on-surface);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body::selection {
+    background-color: var(--color-primary-azure);
+    color: white;
+  }
+
+  h1, h2, h3, h4 {
+    color: var(--color-primary-navy);
+    letter-spacing: -0.02em;
+    font-weight: 900;
+  }
+}
+
+@layer components {
+  /* No-Line Rule: Define structure through background shifts, not borders */
+  .paper-low { background-color: var(--color-surface-container-low); }
+  .paper-lowest { background-color: var(--color-surface-container-lowest); }
+  .paper-nested { background-color: var(--color-surface-container); }
+
+  /* Glassmorphism Logic */
+  .glass {
+    background-color: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(24px);
+  }
+
+  /* Executive CTA: 135deg Gradient */
+  .btn-azure {
+    background: linear-gradient(135deg, #00658D, #00AEEF);
+    color: white;
+    font-weight: 900;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 12px rgba(0, 174, 239, 0.15);
+  }
+  .btn-azure:active { transform: scale(0.98); }
+
+  /* Micro-Tag Logic */
+  .micro-tag {
+    font-size: 10px;
+    text-transform: uppercase;
+    font-weight: 900;
+    letter-spacing: 0.05em;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+
+  /* The Ghost Border ( Felt, not seen ) */
+  .ghost-border {
+    border: 1px solid rgba(189, 200, 209, 0.2);
+  }
+}
+
+/* Custom Scrollbar for Clinical Precision */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background-color: var(--color-surface); }
+::-webkit-scrollbar-thumb { 
+  background-color: var(--color-surface-container-highest); 
+  border-radius: 10px; 
+}
+::-webkit-scrollbar-thumb:hover { background-color: var(--color-outline-variant); }
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  color: var(--color-primary-azure);
+  /* Optical alignment stroke simulate */
+  -webkit-text-stroke: 0.5px var(--color-primary-azure);
+}
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(0, 174, 239, 0.1);
+  border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 174, 239, 0.2);
+}

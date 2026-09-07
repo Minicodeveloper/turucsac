@@ -1,0 +1,13 @@
+storage/certs/
+
+storage/certs/
+
+*.p12
+
+*.pfx
+
+storage/cdr/
+
+storage/xml/
+
+vendor/

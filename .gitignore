@@ -1,13 +1,6 @@
-storage/certs/
-
-storage/certs/
-
+/vendor/
+/storage/certs/
 *.p12
-
 *.pfx
-
-storage/cdr/
-
-storage/xml/
-
-vendor/
+*.pem
+.env

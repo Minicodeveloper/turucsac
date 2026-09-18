@@ -59,6 +59,10 @@ export const dashboardService = {
   getMetrics: () => api.get('/dashboard.php').then(res => res.data),
 };
 
+export const salesService = {
+  getAll: () => api.get('/sales.php').then(res => res.data),
+};
+
 export const customerService = {
   getAll: () => api.get('/customers.php').then(res => res.data),
   searchByDoc: (doc) => api.get(`/customers.php?documento=${doc}`).then(res => res.data),

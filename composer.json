@@ -1,5 +1,8 @@
 {
     "require": {
-        "greenter/greenter": "^5.3"
+        "greenter/greenter": "^5.3",
+        "vlucas/phpdotenv": "^5.7",
+        "dompdf/dompdf": "^3.1",
+        "chillerlan/php-qrcode": "^6.0"
     }
 }

@@ -117,13 +117,19 @@ CREATE TABLE IF NOT EXISTS `ventas` (
   `placa` varchar(15) DEFAULT NULL,
   `metodo_pago` varchar(50) DEFAULT 'Efectivo',
   `tipo_comprobante` varchar(50) DEFAULT 'Boleta',
+  `serie` varchar(4) DEFAULT 'B001',
+  `correlativo` int(11) DEFAULT NULL,
+  `sunat_codigo` varchar(10) DEFAULT NULL,
+  `sunat_mensaje` varchar(255) DEFAULT NULL,
+  `sunat_xml_path` varchar(255) DEFAULT NULL,
+  `sunat_cdr_path` varchar(255) DEFAULT NULL,
   `fecha_venta` timestamp NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
   UNIQUE KEY `ticket_id` (`ticket_id`),
   KEY `combustible_id` (`combustible_id`),
-  KEY `cliente_id` (`cliente_id`)
+  KEY `cliente_id` (`cliente_id`),
+  KEY `idx_serie_correlativo` (`serie`, `correlativo`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 -- --------------------------------------------------------
 
 --

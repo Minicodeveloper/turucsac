@@ -12,6 +12,7 @@ const Sidebar = () => {
   const menuItems = [
     { name: 'Panel de Control', icon: 'dashboard', path: '/panel' },
     { name: 'Ventas', icon: 'point_of_sale', path: '/pos' },
+    { name: 'Boletas', icon: 'receipt_long', path: '/boletas' },
     { name: 'Compras', icon: 'shopping_cart', path: '/compras' },
     { name: 'Inventario', icon: 'inventory_2', path: '/inventario' },
     { name: 'Analítica', icon: 'analytics', path: '/dashboard' },

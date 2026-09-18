@@ -15,6 +15,7 @@ import AdminConfiguracion from './pages/Admin/AdminConfiguracion';
 import Panel from './pages/Panel/Panel';
 import Dashboard from './pages/Dashboard/Dashboard';
 import POS from './pages/POS/POS';
+import HistorialBoletas from './pages/Boletas/HistorialBoletas';
 import Inventory from './pages/Inventory/Inventory';
 import Compras from './pages/Compras/Compras';
 import Finanzas from './pages/Finanzas/Finanzas';
@@ -75,6 +76,7 @@ const router = createBrowserRouter([
   { path: '/panel',      element: <P><Panel /></P> },
   { path: '/dashboard',  element: <P><Dashboard /></P> },
   { path: '/pos',          element: <P><POS /></P> },
+  { path: '/boletas',      element: <P><HistorialBoletas /></P> },
   { path: '/compras',      element: <P><Compras /></P> },
   { path: '/finanzas',     element: <P><Finanzas /></P> },
   { path: '/conciliacion', element: <P><Conciliacion /></P> },

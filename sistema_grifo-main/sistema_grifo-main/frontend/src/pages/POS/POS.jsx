@@ -102,47 +102,142 @@ const POS = () => {
     }
   };
 
-  const generateTicket = (ticketId, sunatData) => {
-    const doc = new jsPDF({ format: [80, 160], unit: 'mm' });
-    const fecha = new Date().toLocaleString();
-    const userSession = JSON.parse(sessionStorage.getItem('usuario') || '{}');
-    const cajero = userSession.name || 'Cajero Operativo';
 
-    doc.setFont("courier", "bold");
-    doc.setFontSize(14);
-    doc.text("TURUCSAC - GRIFO", 40, 15, { align: "center" });
-    doc.setFont("courier", "normal");
-    doc.setFontSize(8);
-    doc.text(`TICKET: ${ticketId}`, 5, 25);
-    doc.text(`FECHA: ${fecha}`, 5, 30);
-    doc.text(`CAJERO: ${cajero}`, 5, 35);
-    doc.line(5, 38, 75, 38);
-    doc.text(`PRODUCTO: ${selectedFuel.name}`, 5, 45);
-    doc.text(`GALONES: ${gallons}`, 5, 50);
-    doc.text(`PRECIO UNIT: S/ ${currentPrice.toFixed(2)}`, 5, 55);
-    doc.line(5, 60, 75, 60);
-    
-    doc.setFontSize(10);
-    doc.setFont("courier", "bold");
-    doc.text("TOTAL:", 5, 70);
-    doc.text(`S/ ${numAmount.toFixed(2)}`, 75, 70, { align: "right" });
-    
-    // SUNAT Metadata Simulation
-    if (sunatData) {
-      doc.setFontSize(6);
-      doc.setFont("courier", "normal");
-      doc.line(5, 75, 75, 75);
-      doc.text(`RESUMEN HASH: ${sunatData.hash.substring(0, 32)}...`, 5, 82);
-      doc.text(`VALOR FIRMA: ${sunatData.signature}`, 5, 86);
-      doc.text(`ESTADO OSE: ${sunatData.ose_status}`, 5, 90);
-      
-      doc.setFontSize(7);
-      doc.text("Representación impresa de la Boleta", 40, 125, { align: "center" });
-      doc.text("Electrónica. Consulte en turucsac.pe", 40, 129, { align: "center" });
-    }
 
-    doc.save(`${ticketId}.pdf`);
-  };
+
+
+
+      const generateTicket = (ticketId, sunatData) => {
+        // Formato de papel térmico continuo (80mm x 200mm)
+        const doc = new jsPDF({ format: [80, 200], unit: 'mm' });
+        const fecha = new Date().toLocaleString();
+        const userSession = JSON.parse(sessionStorage.getItem('usuario') || '{}');
+        const cajero = userSession.name || 'DAVIS';
+
+        // Helper para líneas punteadas idénticas al ticket térmico
+        const drawDottedLine = (y) => {
+          doc.setLineDashPattern([0.8, 0.8], 0);
+          doc.line(5, y, 75, y);
+          doc.setLineDashPattern([], 0);
+        };
+
+        // Función auxiliar para convertir el total a letras simple
+        const numeroALetras = (monto) => {
+          const entero = Math.floor(monto);
+          const centavos = Math.round((monto - entero) * 100).toString().padStart(2, '0');
+          // Para números habituales o texto estándar
+          return `SON: ${entero} CON ${centavos}/100 SOLES`;
+        };
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.text("TURUC S.A.C.", 40, 10, { align: "center" });
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7);
+        doc.text("Venta al mejor Precio", 40, 14, { align: "center" });
+        doc.text("Cel. 955 114 219 - 960 466 647", 40, 17.5, { align: "center" });
+        doc.text("ventas@turucsac.pe", 40, 21, { align: "center" });
+        doc.text("Av. Principal N° 123, Urb. Industrial", 40, 24.5, { align: "center" });
+        doc.text("Lima - Lima - Lima", 40, 28, { align: "center" });
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.text("RUC: 20613708457", 40, 32.5, { align: "center" });
+
+        const esFactura = docType.toLowerCase().includes('factura');
+        const tituloDoc = esFactura ? "FACTURA ELECTRONICA" : "BOLETA DE VENTA ELECTRONICA";
+        doc.text(tituloDoc, 40, 36.5, { align: "center" });
+        doc.text(ticketId || "B001-37", 40, 40.5, { align: "center" });
+
+        // Bloque Adquiriente
+        doc.setFontSize(7.5);
+        doc.text("ADQUIRIENTE", 5, 46);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7);
+        doc.text(`L.E/DNI: ${dni || '78631951'}`, 5, 50);
+        const nombreCliente = customer?.razon_social || (esFactura ? 'EMPRESA REGISTRADA' : 'CLIENTES VARIOS');
+        doc.text(nombreCliente.toUpperCase(), 5, 54);
+        doc.text("-", 5, 57.5);
+
+        // Metadatos
+        doc.setFont("helvetica", "bold");
+        doc.text(`FECHA: ${fecha}`, 5, 62);
+        doc.setFont("helvetica", "normal");
+        doc.text("FORMA PAGO: CONTADO", 5, 66);
+        doc.text(`VENDEDOR: ${cajero.toUpperCase()}`, 5, 70);
+
+        // Tabla de ítems
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(6.8);
+        doc.text("DESCRIPCION", 5, 75);
+        doc.text("CANT.", 36, 75);
+        doc.text("U.M.", 47, 75);
+        doc.text("PRECIO", 55, 75);
+        doc.text("IMPORTE", 75, 75, { align: "right" });
+
+        drawDottedLine(77);
+
+        doc.setFont("helvetica", "normal");
+        doc.text(selectedFuel.name.toUpperCase(), 5, 81);
+        doc.text(`${gallons}`, 36, 85);
+        doc.text("GLI", 47, 85);
+        doc.text(`${currentPrice.toFixed(2)}`, 55, 85);
+        doc.text(`${numAmount.toFixed(2)}`, 75, 85, { align: "right" });
+
+        drawDottedLine(88);
+
+        // Totales
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.text("TOTAL S/", 45, 93);
+        doc.text(`${numAmount.toFixed(2)}`, 75, 93, { align: "right" });
+
+        drawDottedLine(96);
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(6.8);
+        doc.text(numeroALetras(numAmount), 40, 100.5, { align: "center" });
+
+        drawDottedLine(103);
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7.5);
+        doc.text(`EFECTIVO S/ ${numAmount.toFixed(2)}`, 5, 107.5);
+
+        drawDottedLine(110);
+
+        // Placa
+        const placaValor = plate.trim() ? plate.toUpperCase() : 'ABC123';
+        doc.text(`PLACA: ${placaValor}`, 5, 114.5);
+
+        drawDottedLine(117);
+
+        // Pie legal
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(6);
+        doc.text("Representación impresa de la Boleta de Venta Electrónica", 40, 121, { align: "center" });
+        doc.text("Autorizado mediante Resolución de Intendencia", 40, 124.5, { align: "center" });
+        doc.text("N° 094-005-0001933/SUNAT", 40, 128, { align: "center" });
+
+        // Código QR
+        const qrData = `20613708457|${esFactura ? '01' : '03'}|${ticketId}|0.00|${numAmount.toFixed(2)}|${fecha}|${dni || '00000000'}|`;
+        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(qrData)}`;
+        
+        try {
+          doc.addImage(qrUrl, "PNG", 30, 131, 20, 20);
+        } catch (e) {}
+
+        doc.setFontSize(6.5);
+        doc.setFont("helvetica", "bold");
+        doc.text("Emitido desde WWW.TURUCSAC.PE", 40, 156, { align: "center" });
+        doc.setFont("helvetica", "normal");
+        doc.text("GRACIAS POR SU PREFERENCIA...", 40, 160, { align: "center" });
+
+        doc.save(`${ticketId || 'ticket'}.pdf`);
+      };
+
+
 
   return (
     <div className="min-h-screen flex bg-[var(--surface)]">

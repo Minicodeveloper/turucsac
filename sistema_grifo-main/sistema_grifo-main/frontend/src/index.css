@@ -1,29 +1,36 @@
 @import "tailwindcss";
 
 @theme {
-  /* Azure Logic: Active Neutrals Palette */
-  --color-surface: #F8F9FA;
-  --color-surface-container-lowest: #FFFFFF;
-  --color-surface-container-low: #F3F4F5;
-  --color-surface-container: #EDEEEF;
-  --color-surface-container-high: #E1E2E3;
-  --color-surface-container-highest: #D0D1D2;
-  
-  --color-primary: #00AEEF;
-  --color-primary-container: #00AEEF;
-  --color-on-primary-container: #FFFFFF;
-  --color-primary-navy: #0B1D2D;
-  
-  --color-secondary-fixed: #0B1D2D;
-  --color-on-secondary-fixed: #0B1D2D;
-  
-  --color-on-surface: #191C1D;
-  --color-on-surface-variant: #3E4850;
-  --color-outline-variant: #BDC8D1;
-  --color-error: #BA1A1A;
+  /* Rapifac / ERP Base Palette */
+  --color-surface: #f4f7fa;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f8fafc;
+  --color-surface-container: #edf2f7;
+  --color-surface-container-high: #e2e8f0;
+  --color-surface-container-highest: #cbd5e1;
+
+  /* Colores Principales Rapifac */
+  --color-primary: #24a0ed;
+  --color-primary-hover: #1e87c9;
+  --color-primary-dark: #0f4c81;
+  --color-primary-container: #24a0ed;
+  --color-on-primary-container: #ffffff;
+
+  /* Colores Contables y Estados */
+  --color-erp-green: #00c49f;
+  --color-erp-green-hover: #00a887;
+  --color-erp-wine: #7f1d1d;
+  --color-erp-danger: #ff4d6d;
+  --color-erp-orange: #ffa726;
+
+  /* Tipografía y bordes */
+  --color-on-surface: #1e293b;
+  --color-on-surface-variant: #64748b;
+  --color-outline-variant: #cbd5e1;
+  --color-border-grid: #e2e8f0;
 }
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
 
 @layer base {
@@ -31,86 +38,113 @@
     background-color: var(--color-surface);
     color: var(--color-on-surface);
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     -webkit-font-smoothing: antialiased;
+    font-size: 13px; /* Escala compacta ERP */
+    line-height: 1.4;
   }
 
   body::selection {
-    background-color: var(--color-primary-azure);
-    color: white;
+    background-color: var(--color-primary);
+    color: #ffffff;
   }
 
   h1, h2, h3, h4 {
-    color: var(--color-primary-navy);
-    letter-spacing: -0.02em;
-    font-weight: 900;
+    letter-spacing: -0.01em;
+    font-weight: 700;
   }
 }
 
 @layer components {
-  /* No-Line Rule: Define structure through background shifts, not borders */
-  .paper-low { background-color: var(--color-surface-container-low); }
-  .paper-lowest { background-color: var(--color-surface-container-lowest); }
-  .paper-nested { background-color: var(--color-surface-container); }
-
-  /* Glassmorphism Logic */
-  .glass {
-    background-color: rgba(255, 255, 255, 0.8);
-    backdrop-filter: blur(24px);
+  /* Contenedores tipo Rapifac */
+  .erp-panel {
+    background-color: #ffffff;
+    border: 1px solid var(--color-border-grid);
+    border-radius: 4px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   }
 
-  /* Executive CTA: 135deg Gradient */
-  .btn-azure {
-    background: linear-gradient(135deg, #00658D, #00AEEF);
-    color: white;
-    font-weight: 900;
-    border-radius: 8px;
-    transition: all 0.2s ease;
-    box-shadow: 0 4px 12px rgba(0, 174, 239, 0.15);
+  /* Botones principales estilo Rapifac */
+  .btn-rapifac-primary {
+    background-color: #24a0ed;
+    color: #ffffff;
+    font-weight: 700;
+    padding: 0.35rem 0.85rem;
+    border-radius: 4px;
+    transition: background-color 0.15s ease;
+    font-size: 12px;
   }
-  .btn-azure:active { transform: scale(0.98); }
+  .btn-rapifac-primary:hover {
+    background-color: #1e87c9;
+  }
 
-  /* Micro-Tag Logic */
-  .micro-tag {
-    font-size: 10px;
+  .btn-rapifac-success {
+    background-color: #00c49f;
+    color: #ffffff;
+    font-weight: 700;
+    padding: 0.35rem 0.85rem;
+    border-radius: 4px;
+    transition: background-color 0.15s ease;
+    font-size: 12px;
+  }
+  .btn-rapifac-success:hover {
+    background-color: #00a887;
+  }
+
+  .btn-rapifac-danger {
+    background-color: #ff4d6d;
+    color: #ffffff;
+    font-weight: 700;
+    padding: 0.35rem 0.85rem;
+    border-radius: 4px;
+    transition: background-color 0.15s ease;
+    font-size: 12px;
+  }
+  .btn-rapifac-danger:hover {
+    background-color: #e63956;
+  }
+
+  /* Inputs compactos para punto de venta y formularios */
+  .erp-input {
+    height: 32px;
+    padding: 0 0.5rem;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    font-size: 12px;
+    background-color: #ffffff;
+    outline: none;
+    transition: border-color 0.15s ease;
+  }
+  .erp-input:focus {
+    border-color: #24a0ed;
+    box-shadow: 0 0 0 1px #24a0ed;
+  }
+
+  /* Cabeceras de tabla tipo grilla contable */
+  .erp-table-header {
+    background-color: #f8fafc;
+    border-bottom: 2px solid #e2e8f0;
+    font-size: 11px;
+    font-weight: 700;
     text-transform: uppercase;
-    font-weight: 900;
-    letter-spacing: 0.05em;
-    padding: 2px 8px;
+    color: #475569;
+  }
+
+  /* Compatibilidad con clases anteriores para no romper pantallas no modificadas */
+  .paper-lowest { background-color: #ffffff; }
+  .paper-nested { background-color: #edf2f7; }
+  .btn-azure {
+    background-color: #24a0ed;
+    color: #ffffff;
+    font-weight: 700;
     border-radius: 4px;
   }
-
-  /* The Ghost Border ( Felt, not seen ) */
-  .ghost-border {
-    border: 1px solid rgba(189, 200, 209, 0.2);
-  }
 }
 
-/* Custom Scrollbar for Clinical Precision */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background-color: var(--color-surface); }
+/* Scrollbars sobrias */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background-color: #f1f5f9; }
 ::-webkit-scrollbar-thumb { 
-  background-color: var(--color-surface-container-highest); 
-  border-radius: 10px; 
+  background-color: #cbd5e1; 
+  border-radius: 4px; 
 }
-::-webkit-scrollbar-thumb:hover { background-color: var(--color-outline-variant); }
-
-.material-symbols-outlined {
-  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
-  color: var(--color-primary-azure);
-  /* Optical alignment stroke simulate */
-  -webkit-text-stroke: 0.5px var(--color-primary-azure);
-}
-.custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(0, 174, 239, 0.1);
-  border-radius: 10px;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 174, 239, 0.2);
-}
+::-webkit-scrollbar-thumb:hover { background-color: #94a3b8; }

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Sidebar from '../../components/Sidebar';
 import { financeService } from '../../services/api';
 import {
@@ -12,7 +13,7 @@ import {
   LineElement,
   Filler
 } from 'chart.js';
-import { Pie, Line } from 'react-chartjs-2';
+import { Doughnut } from 'react-chartjs-2';
 
 ChartJS.register(
   ArcElement, Tooltip, Legend, 
@@ -21,124 +22,315 @@ ChartJS.register(
 );
 
 const Finanzas = () => {
+  const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // Filtros visuales ERP
+  const [activeTab, setActiveTab] = useState('resumen');
+  const [sucursal, setSucursal] = useState('TODAS');
+  const [moneda, setMoneda] = useState('SOLES');
+  
+  const todayStr = new Date().toISOString().split('T')[0];
+  const [fechaDesde, setFechaDesde] = useState('2026-09-01');
+  const [fechaHasta, setFechaHasta] = useState(todayStr);
 
   useEffect(() => {
     fetchStats();
   }, []);
 
   const fetchStats = async () => {
+    setLoading(true);
     try {
       const resp = await financeService.getStats();
-      if (resp.success) setStats(resp.data);
+      if (resp) {
+        const payload = resp.data ? resp.data : resp;
+        setStats(payload);
+      }
     } catch (err) {
-      console.error(err);
+      console.error('Error al cargar finanzas:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center bg-[var(--surface)]"><span className="material-symbols-outlined animate-spin text-4xl">sync</span></div>;
+  const formatPEN = (val) => {
+    const num = Number(val) || 0;
+    return num.toLocaleString('es-PE', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  };
 
-  const pieData = {
-    labels: stats?.metodos_pago?.map(m => m.label) || [],
+  const totalIngresos = parseFloat(stats?.ingresos ?? 0);
+  const totalEgresos = parseFloat(stats?.egresos ?? 0);
+  const balanceUtilidad = parseFloat(stats?.balance ?? (totalIngresos - totalEgresos));
+  
+  const egresoCompras = parseFloat(stats?.detalle_egresos?.compras ?? 0);
+  const egresoGastos = parseFloat(stats?.detalle_egresos?.gastos ?? 0);
+
+  const metodosPagoLista = Array.isArray(stats?.metodos_pago) ? stats.metodos_pago : [];
+
+  const chartData = {
+    labels: metodosPagoLista.length > 0 ? metodosPagoLista.map(m => m.label) : ['Sin ventas'],
     datasets: [{
-      data: stats?.metodos_pago?.map(m => m.value) || [],
-      backgroundColor: ['#00AEEF', '#8B5CF6', '#F59E0B', '#10B981'],
-      borderWidth: 0,
-      hoverOffset: 12
+      data: metodosPagoLista.length > 0 ? metodosPagoLista.map(m => parseFloat(m.value || 0)) : [1],
+      backgroundColor: metodosPagoLista.length > 0 
+        ? ['#24a0ed', '#8B5CF6', '#f59e0b', '#10b981', '#ef4444', '#06b6d4'] 
+        : ['#e2e8f0'],
+      borderWidth: 2,
+      borderColor: '#ffffff',
+      hoverOffset: 4
     }]
   };
 
-  const pieOptions = {
+  const chartOptions = {
     plugins: {
-      legend: { position: 'bottom', labels: { color: '#BDC8D1', font: { weight: '800', size: 10 }, usePointStyle: true } }
+      legend: { 
+        position: 'bottom', 
+        labels: { 
+          color: '#334155', 
+          font: { weight: 'bold', size: 10 }, 
+          usePointStyle: true, 
+          boxWidth: 6,
+          padding: 10
+        } 
+      },
+      tooltip: {
+        callbacks: {
+          label: (context) => ` S/ ${formatPEN(context.raw)}`
+        }
+      }
     },
+    cutout: '60%',
     maintainAspectRatio: false
   };
 
+  const tabs = [
+    { id: 'resumen', label: 'Resumen General' },
+    { id: 'por_cobrar', label: 'Cuentas por Cobrar' },
+    { id: 'por_pagar', label: 'Cuentas por Pagar' },
+    { id: 'transferencias', label: 'Transferencias' },
+    { id: 'otros_egresos', label: 'Gastos de Operación' },
+    { id: 'flujo', label: 'Cierres de Caja / Turnos' },
+  ];
+
+  const handleTabClick = (tabId) => {
+    if (tabId === 'flujo') {
+      navigate('/conciliacion');
+    } else {
+      setActiveTab(tabId);
+    }
+  };
+
   return (
-    <div className="min-h-screen flex bg-[var(--surface)]">
+    <div className="min-h-screen flex bg-[#f1f5f9] text-slate-800 text-xs font-sans">
       <Sidebar />
-      <main className="flex-1 md:ml-64 pt-24 pb-12 px-10 max-w-7xl mx-auto space-y-10">
-        
-        <header className="flex items-end justify-between border-b-[3px] border-[var(--primary-container)] pb-6">
-          <div>
-            <h1 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--primary-container)] mb-1">Métricas de Rentabilidad</h1>
-            <h2 className="text-5xl font-black tracking-tighter text-[var(--on-secondary-fixed)] uppercase">Balances Financieros</h2>
+
+      <main className="flex-1 md:ml-60 p-3 sm:p-4 flex flex-col gap-2.5 max-w-[1600px]">
+        {/* Cabecera Principal */}
+        <header className="bg-[#24a0ed] text-white px-4 py-2 rounded flex justify-between items-center shadow-xs">
+          <div className="flex items-center gap-2">
+            <span className="font-black italic tracking-wide text-sm uppercase">TURUCSAC &gt;&gt;</span>
+            <span className="text-[11px] font-bold text-sky-100 uppercase tracking-tight">CAJA Y BANCOS - GESTIÓN FINANCIERA</span>
           </div>
-          <button onClick={() => window.print()} className="paper-nested px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest text-[var(--primary-container)] hover:bg-[var(--primary-container)] hover:text-white transition-all flex items-center gap-2">
-            <span className="material-symbols-outlined text-[16px]">print</span> Generar Informe
+          <button 
+            type="button"
+            onClick={() => window.print()}
+            className="bg-sky-800/40 hover:bg-sky-800/60 px-3 py-1 rounded text-white font-bold text-[11px] transition-colors flex items-center gap-1.5 cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[15px]">print</span>
+            <span>EXPORTAR INFORME</span>
           </button>
         </header>
 
-        {/* Global ROI Layer */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-           {[
-             { label: 'Ingresos Acumulados', val: `S/ ${stats?.ingresos.toFixed(2)}`, color: 'text-emerald-500', icon: 'trending_up' },
-             { label: 'Egresos Totales', val: `S/ ${stats?.egresos.toFixed(2)}`, color: 'text-[var(--error)]', icon: 'trending_down' },
-             { label: 'Utilidad Operativa', val: `S/ ${stats?.balance.toFixed(2)}`, color: 'text-[var(--primary-container)]', icon: 'auto_graph' },
-             { label: 'Margen Estimado', val: `${((stats?.balance / (stats?.ingresos || 1)) * 100).toFixed(1)}%`, color: 'text-[var(--on-secondary-fixed)]', icon: 'percent' }
-           ].map((m, idx) => (
-             <div key={idx} className="paper-lowest p-8 rounded-2xl shadow-sm flex flex-col gap-1 hover:bg-[var(--surface-container-low)] transition-all group">
-                <span className={`material-symbols-outlined ${m.color} text-xl mb-2`}>{m.icon}</span>
-                <span className="text-[10px] font-black text-[var(--outline-variant)] uppercase tracking-widest leading-none">{m.label}</span>
-                <span className={`text-2xl font-black tracking-tighter leading-tight ${m.color}`}>{m.val}</span>
-             </div>
-           ))}
+        {/* 1. Botonera Superior de Sub-Pestañas */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-1.5">
+          {tabs.map((tab) => {
+            const isSelected = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => handleTabClick(tab.id)}
+                className={`py-1.5 px-2 rounded font-bold text-[11px] text-center transition-all cursor-pointer truncate ${
+                  isSelected
+                    ? 'bg-[#24a0ed] text-white shadow-xs'
+                    : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-           {/* Detailed Expenses Breakdown */}
-           <div className="lg:col-span-8 paper-lowest rounded-[2.5rem] p-10">
-              <h3 className="text-[12px] font-black uppercase tracking-[0.2em] text-[var(--on-secondary-fixed)] mb-10 border-b border-white/5 pb-4">Desglose de Egresos Logísticos</h3>
-              <div className="space-y-8">
-                 {[
-                   { label: 'Compras de Combustible (Cisternas)', val: stats?.detalle_egresos.compras, icon: 'local_shipping', color: 'bg-[var(--primary-container)]/10 text-[var(--primary-container)]' },
-                   { label: 'Gastos de Operación (Caja Chica)', val: stats?.detalle_egresos.gastos, icon: 'receipt_long', color: 'bg-[var(--error)]/10 text-[var(--error)]' },
-                 ].map((e, idx) => (
-                   <div key={idx} className="flex items-center justify-between p-6 rounded-2xl bg-[var(--surface-container-low)] border border-white/5">
-                      <div className="flex items-center gap-6">
-                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${e.color}`}>
-                           <span className="material-symbols-outlined text-3xl">{e.icon}</span>
-                        </div>
-                        <div>
-                           <p className="text-sm font-black text-[var(--on-secondary-fixed)] tracking-tight uppercase leading-none">{e.label}</p>
-                           <p className="text-[10px] font-bold text-[var(--outline-variant)] mt-1 tracking-widest uppercase">Rubros Contables Registrados</p>
-                        </div>
-                      </div>
-                      <span className="text-2xl font-black text-[var(--on-secondary-fixed)] tracking-tighter">S/ {parseFloat(e.val).toFixed(2)}</span>
-                   </div>
-                 ))}
-                 
-                 <div className="pt-10 flex items-center justify-between">
-                    <p className="text-[10px] font-black text-[var(--outline-variant)] uppercase tracking-[0.4em]">Arquitectura Contable 2026</p>
-                    <div className="flex gap-2">
-                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                       <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Sincronizado</span>
-                    </div>
-                 </div>
-              </div>
-           </div>
+        {/* 2. Barra de Filtros tipo ERP */}
+        <div className="bg-white p-2.5 rounded border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <div className="flex items-center gap-1.5">
+              <label className="font-bold text-slate-600 text-[11px]">Sucursal:</label>
+              <select 
+                value={sucursal} 
+                onChange={(e) => setSucursal(e.target.value)}
+                className="h-7 border border-slate-300 rounded px-2 text-xs font-semibold bg-slate-50 outline-none cursor-pointer"
+              >
+                <option value="TODAS">TODAS LAS SUCURSALES</option>
+                <option value="LIMA">LIMA (ESTACIÓN CENTRAL)</option>
+                <option value="SUCURSAL NORTE">SUCURSAL NORTE</option>
+              </select>
+            </div>
 
-           {/* Distribution by payment method */}
-           <div className="lg:col-span-4 paper-lowest rounded-[2.5rem] p-10 flex flex-col">
-              <h3 className="text-[12px] font-black uppercase tracking-[0.2em] text-[var(--on-secondary-fixed)] mb-10">Canales de Ingreso</h3>
-              <div className="flex-1 min-h-[300px] mb-8">
-                 <Pie data={pieData} options={pieOptions} />
-              </div>
-              <div className="space-y-3">
-                 {stats?.metodos_pago.map((m, i) => (
-                   <div key={i} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0 opacity-80 hover:opacity-100 transition-opacity">
-                      <span className="text-[10px] font-black text-[var(--outline-variant)] uppercase tracking-widest">{m.label}</span>
-                      <span className="text-xs font-black text-[var(--on-secondary-fixed)] uppercase tracking-tighter">S/ {parseFloat(m.value).toFixed(2)}</span>
-                   </div>
-                 ))}
-              </div>
-           </div>
+            <div className="flex items-center gap-1.5">
+              <label className="font-bold text-slate-600 text-[11px]">Desde:</label>
+              <input 
+                type="date" 
+                value={fechaDesde}
+                onChange={(e) => setFechaDesde(e.target.value)}
+                className="h-7 border border-slate-300 rounded px-2 text-xs font-semibold outline-none"
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <label className="font-bold text-slate-600 text-[11px]">Hasta:</label>
+              <input 
+                type="date" 
+                value={fechaHasta}
+                onChange={(e) => setFechaHasta(e.target.value)}
+                className="h-7 border border-slate-300 rounded px-2 text-xs font-semibold outline-none"
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <label className="font-bold text-slate-600 text-[11px]">Moneda:</label>
+              <select 
+                value={moneda} 
+                onChange={(e) => setMoneda(e.target.value)}
+                className="h-7 border border-slate-300 rounded px-2 text-xs font-semibold bg-slate-50 outline-none cursor-pointer"
+              >
+                <option value="SOLES">SOLES (S/)</option>
+                <option value="USD">DÓLARES ($)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button 
+              type="button"
+              onClick={fetchStats}
+              className="bg-[#24a0ed] hover:bg-sky-600 text-white font-bold px-4 h-7 rounded text-[11px] transition-colors cursor-pointer flex items-center gap-1"
+            >
+              {loading && <span className="material-symbols-outlined text-sm animate-spin">sync</span>}
+              <span>Buscar</span>
+            </button>
+          </div>
         </div>
 
+        {/* 3. Panel de Flujo de Caja */}
+        <div className="space-y-2">
+          {/* Banner Rojo Vino: Saldo Inicial / Recaudación Acumulada */}
+          <div className="bg-[#7f1d1d] text-white px-3 py-1.5 rounded flex justify-between items-center shadow-xs">
+            <span className="font-bold tracking-wide text-xs uppercase">Saldo Inicial de Efectivo / Caja Activa</span>
+            <span className="font-mono font-black text-sm">
+              S/ {formatPEN(totalIngresos)}
+            </span>
+          </div>
+
+          {/* Dos Columnas Paralelas: Ingresos vs Egresos */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 items-start">
+            
+            {/* Columna Izquierda: Ingresos */}
+            <div className="bg-white rounded border border-slate-200 shadow-xs overflow-hidden">
+              <div className="bg-[#00c49f] text-white px-3 py-1.5 flex justify-between items-center font-bold text-xs">
+                <span className="uppercase tracking-tight">Ingresos Efectivo</span>
+                <span className="font-mono font-black">S/ {formatPEN(totalIngresos)}</span>
+              </div>
+              <div className="divide-y divide-slate-100 font-medium">
+                <div className="px-3 py-1.5 flex justify-between items-center hover:bg-slate-50">
+                  <span className="text-slate-700">Ventas en Pista (POS Combustibles)</span>
+                  <span className="font-mono font-bold text-slate-900">S/ {formatPEN(totalIngresos)}</span>
+                </div>
+                <div className="px-3 py-1.5 flex justify-between items-center hover:bg-slate-50 text-slate-400">
+                  <span>Cuentas por Cobrar</span>
+                  <span className="font-mono">S/ 0.00</span>
+                </div>
+                <div className="px-3 py-1.5 flex justify-between items-center hover:bg-slate-50 text-slate-400">
+                  <span>Otros Ingresos de Caja</span>
+                  <span className="font-mono">S/ 0.00</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Columna Derecha: Egresos */}
+            <div className="bg-white rounded border border-slate-200 shadow-xs overflow-hidden">
+              <div className="bg-[#00c49f] text-white px-3 py-1.5 flex justify-between items-center font-bold text-xs">
+                <span className="uppercase tracking-tight">Egresos Efectivo</span>
+                <span className="font-mono font-black">S/ {formatPEN(totalEgresos)}</span>
+              </div>
+              <div className="divide-y divide-slate-100 font-medium">
+                <div className="px-3 py-1.5 flex justify-between items-center hover:bg-slate-50">
+                  <span className="text-slate-700">Compras de Combustible (Cisternas)</span>
+                  <span className="font-mono font-bold text-rose-600">
+                    -S/ {formatPEN(egresoCompras)}
+                  </span>
+                </div>
+                <div className="px-3 py-1.5 flex justify-between items-center hover:bg-slate-50">
+                  <span className="text-slate-700">Gastos Operativos (Caja Chica)</span>
+                  <span className="font-mono font-bold text-rose-600">
+                    -S/ {formatPEN(egresoGastos)}
+                  </span>
+                </div>
+                <div className="px-3 py-1.5 flex justify-between items-center hover:bg-slate-50 text-slate-400">
+                  <span>Cuentas por Pagar</span>
+                  <span className="font-mono">S/ 0.00</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Banner Rojo Vino: Saldo Final / Balance */}
+          <div className="bg-[#7f1d1d] text-white px-3 py-1.5 rounded flex justify-between items-center shadow-xs">
+            <span className="font-bold tracking-wide text-xs uppercase">Saldo Final Efectivo (Balance de Caja)</span>
+            <span className="font-mono font-black text-sm">
+              S/ {formatPEN(balanceUtilidad)}
+            </span>
+          </div>
+        </div>
+
+        {/* 4. Canales de Recaudación y Gráfico */}
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-2.5 items-start">
+          <div className="md:col-span-8 bg-white p-3 rounded border border-slate-200 shadow-xs space-y-1.5">
+            <div className="flex justify-between items-center border-b border-slate-200 pb-1.5">
+              <h4 className="font-bold text-xs text-slate-700 uppercase tracking-wider">
+                Desglose de Recaudación por Medios de Pago
+              </h4>
+              <span className="text-[10px] text-slate-400 font-semibold">
+                {metodosPagoLista.length} canal{metodosPagoLista.length === 1 ? '' : 'es'}
+              </span>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {metodosPagoLista.length === 0 ? (
+                <p className="py-4 text-center text-slate-400 italic">No hay registros de métodos de pago en el rango seleccionado.</p>
+              ) : (
+                metodosPagoLista.map((m, i) => (
+                  <div key={i} className="py-1.5 flex justify-between items-center text-xs hover:bg-slate-50 px-1 rounded">
+                    <span className="font-semibold text-slate-600 uppercase">{m.label}</span>
+                    <span className="font-mono font-black text-slate-900">S/ {formatPEN(m.value)}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="md:col-span-4 bg-white p-3 rounded border border-slate-200 shadow-xs flex flex-col">
+            <h4 className="font-bold text-xs text-slate-700 uppercase tracking-wider border-b border-slate-200 pb-1.5 mb-1">
+              Proporción por Canal
+            </h4>
+            <div className="h-44 flex items-center justify-center p-1">
+              <Doughnut data={chartData} options={chartOptions} />
+            </div>
+          </div>
+        </div>
       </main>
     </div>
   );

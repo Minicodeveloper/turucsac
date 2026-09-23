@@ -18,6 +18,9 @@ const SidebarGym = () => {
 
   ];
 
+
+  
+
   const isOnMainPanel = location.pathname === '/gimnasio';
   const menuItems = isOnMainPanel
     ? [{ name: 'Panel de Control', icon: 'space_dashboard', path: '/gimnasio' }]

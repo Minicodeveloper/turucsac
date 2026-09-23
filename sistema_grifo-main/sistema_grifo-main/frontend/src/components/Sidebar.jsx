@@ -6,7 +6,10 @@ const Sidebar = () => {
   const location = useLocation();
 
   // Leer usuario de sesión
+// Leer usuario de sesión y validar rol
   const user = JSON.parse(sessionStorage.getItem('usuario') || '{}');
+  const userRole = (user.rol || user.role || 'cajero').toLowerCase();
+  const isAdmin = userRole.includes('admin');
 
   const menuItems = [
     { name: 'Panel de Control', icon: 'dashboard', path: '/panel' },
@@ -15,6 +18,8 @@ const Sidebar = () => {
     { name: 'Compras', icon: 'shopping_cart', path: '/compras' },
     { name: 'Inventario', icon: 'inventory_2', path: '/inventario' },
     { name: 'Analítica', icon: 'analytics', path: '/dashboard' },
+    // Visible únicamente para Administradores
+    ...(isAdmin ? [{ name: 'Finanzas (Caja/Bancos)', icon: 'account_balance', path: '/finanzas' }] : []),
     { name: 'Express', icon: 'speed', path: '/express' },
     { name: 'Conciliación', icon: 'checklist_rtl', path: '/conciliacion' },
   ];

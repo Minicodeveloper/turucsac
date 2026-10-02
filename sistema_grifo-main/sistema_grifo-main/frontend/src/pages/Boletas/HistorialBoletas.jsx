@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import Sidebar from '../../components/Sidebar';
-import { salesService } from '../../services/api';
+import api, { salesService } from '../../services/api';
 
 const HistorialBoletas = () => {
   const [sales, setSales] = useState([]);
@@ -9,6 +9,10 @@ const HistorialBoletas = () => {
   // Filtros ERP
   const [filtroTexto, setFiltroTexto] = useState('');
   const [tipoFiltro, setTipoFiltro] = useState('TODOS');
+
+  // Estado para modal de confirmación simple
+  const [saleToDelete, setSaleToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     fetchSales();
@@ -57,23 +61,48 @@ const HistorialBoletas = () => {
     return filteredSales.reduce((acc, curr) => acc + Number(curr.monto_total || 0), 0);
   }, [filteredSales]);
 
-  // Manejador de apertura / descarga del ticket
-  const handleDownloadPdf = (sale) => {
-    const rawPath = sale.pdf_path || sale.pdf_url || sale.ruta_pdf || '';
-
-    // Si la BD guardó una URL HTTP absoluta directa
-    if (typeof rawPath === 'string' && (rawPath.startsWith('http://') || rawPath.startsWith('https://'))) {
-      window.open(rawPath, '_blank');
-      return;
-    }
-
-    // Ruta hacia el endpoint PHP en Apache
-    const backendBase = 'http://localhost/api';
+  // Manejador de descarga directa para PDF, XML y CDR
+  const handleDownloadFile = (sale, tipo = 'pdf') => {
+    const backendBase = (api.defaults.baseURL || import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
     const param = sale.ticket_id 
       ? `ticket_id=${encodeURIComponent(sale.ticket_id)}` 
       : `id=${sale.id}`;
 
-    window.open(`${backendBase}/descargar_ticket.php?${param}`, '_blank');
+    const url = `${backendBase}/descargar_ticket.php?${param}&tipo=${tipo}`;
+
+    if (tipo === 'pdf') {
+      window.open(url, '_blank');
+    } else {
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${tipo}_${sale.ticket_id || sale.id}`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  };
+
+  // Función para eliminar la boleta seleccionada
+  const confirmarEliminarBoleta = async () => {
+    if (!saleToDelete) return;
+    setDeleting(true);
+    try {
+      const idBorrar = saleToDelete.id || saleToDelete.ticket_id;
+      const resp = await api.delete(`/sales.php?id=${idBorrar}`);
+      
+      if (resp && resp.data && resp.data.success) {
+        // Remover de la tabla de inmediato
+        setSales((prev) => prev.filter((s) => s.id !== saleToDelete.id));
+        setSaleToDelete(null);
+      } else {
+        alert(resp?.data?.message || 'No se pudo eliminar el comprobante.');
+      }
+    } catch (err) {
+      console.error('Error al eliminar boleta:', err);
+      alert('Error en el servidor al intentar eliminar la boleta.');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -163,12 +192,13 @@ const HistorialBoletas = () => {
                   <th className="py-2.5 px-3 text-right">Total</th>
                   <th className="py-2.5 px-3 text-center">Estado SUNAT</th>
                   <th className="py-2.5 px-3 text-center">Archivos</th>
+                  <th className="py-2.5 px-3 text-center w-12">Acción</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium">
                 {loading ? (
                   <tr>
-                    <td colSpan="7" className="py-12 text-center text-slate-400">
+                    <td colSpan="8" className="py-12 text-center text-slate-400">
                       <div className="flex flex-col items-center gap-1.5">
                         <span className="material-symbols-outlined animate-spin text-3xl text-[#24a0ed]">sync</span>
                         <span className="font-bold text-[11px] uppercase">Cargando comprobantes...</span>
@@ -177,7 +207,7 @@ const HistorialBoletas = () => {
                   </tr>
                 ) : filteredSales.length === 0 ? (
                   <tr>
-                    <td colSpan="7" className="py-10 text-center text-slate-400 italic">
+                    <td colSpan="8" className="py-10 text-center text-slate-400 italic">
                       No se encontraron comprobantes emitidos con los criterios actuales.
                     </td>
                   </tr>
@@ -232,19 +262,51 @@ const HistorialBoletas = () => {
                         )}
                       </td>
 
-                      {/* Botón Descarga */}
+                      {/* Botones de Descarga */}
                       <td className="py-2 px-3 text-center">
                         <div className="flex justify-center items-center gap-1">
                           <button
                             type="button"
-                            onClick={() => handleDownloadPdf(sale)}
+                            onClick={() => handleDownloadFile(sale, 'pdf')}
                             className="px-2 py-0.5 bg-[#24a0ed] hover:bg-sky-600 text-white rounded font-mono font-bold text-[10px] transition-colors flex items-center gap-0.5 shadow-xs cursor-pointer"
-                            title="Descargar o reimprimir comprobante"
+                            title="Descargar comprobante en PDF"
                           >
                             <span className="material-symbols-outlined text-[11px]">download</span>
                             PDF
                           </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadFile(sale, 'xml')}
+                            className="px-2 py-0.5 bg-slate-700 hover:bg-slate-800 text-white rounded font-mono font-bold text-[10px] transition-colors flex items-center gap-0.5 shadow-xs cursor-pointer"
+                            title="Descargar XML firmado SUNAT"
+                          >
+                            <span className="material-symbols-outlined text-[11px]">code</span>
+                            XML
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadFile(sale, 'cdr')}
+                            className="px-2 py-0.5 bg-slate-500 hover:bg-slate-600 text-white rounded font-mono font-bold text-[10px] transition-colors flex items-center gap-0.5 shadow-xs cursor-pointer"
+                            title="Descargar Constancia de Recepción SUNAT (CDR)"
+                          >
+                            <span className="material-symbols-outlined text-[11px]">inventory_2</span>
+                            CDR
+                          </button>
                         </div>
+                      </td>
+
+                      {/* Botón Eliminar Comprobante */}
+                      <td className="py-2 px-3 text-center">
+                        <button
+                          type="button"
+                          onClick={() => setSaleToDelete(sale)}
+                          className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                          title="Eliminar este comprobante"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">delete</span>
+                        </button>
                       </td>
                     </tr>
                   ))
@@ -254,6 +316,61 @@ const HistorialBoletas = () => {
           </div>
         </div>
       </main>
+
+      {/* Modal de confirmación para eliminar la boleta */}
+      {saleToDelete && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded border border-slate-200 shadow-xl max-w-sm w-full overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+            <div className="bg-rose-600 text-white px-4 py-2.5 flex items-center justify-between">
+              <span className="font-bold text-xs uppercase tracking-wide flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-base">warning</span>
+                Eliminar Comprobante
+              </span>
+              <button
+                type="button"
+                onClick={() => setSaleToDelete(null)}
+                className="text-white hover:text-rose-200"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-4 flex flex-col gap-3">
+              <p className="text-slate-700 text-xs leading-relaxed">
+                ¿Estás seguro de que deseas eliminar la boleta{' '}
+                <b className="font-mono text-slate-900">
+                  {saleToDelete.serie || 'B001'}-{saleToDelete.correlativo || saleToDelete.id}
+                </b>{' '}
+                ({saleToDelete.ticket_id}) por el monto de{' '}
+                <b className="text-slate-900">S/ {formatPEN(saleToDelete.monto_total)}</b>?
+              </p>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setSaleToDelete(null)}
+                  className="px-3 py-1.5 rounded border border-slate-300 font-bold text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer text-xs"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmarEliminarBoleta}
+                  disabled={deleting}
+                  className="px-3 py-1.5 rounded bg-rose-600 hover:bg-rose-700 text-white font-bold transition-colors cursor-pointer text-xs flex items-center gap-1"
+                >
+                  {deleting ? (
+                    <span className="material-symbols-outlined animate-spin text-[14px]">sync</span>
+                  ) : (
+                    <span className="material-symbols-outlined text-[14px]">delete</span>
+                  )}
+                  Eliminar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

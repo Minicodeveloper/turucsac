@@ -5,7 +5,7 @@ const AdminConfiguracion = () => {
   const user = JSON.parse(sessionStorage.getItem('usuario') || '{}');
 
   const [config, setConfig] = useState({
-    nombre_empresa: 'TURUCSAC',
+    nombre_empresa: user.razon_social || 'TURUCSAC',
     ruc: '20500000001',
     direccion: 'Av. Principal 123, Lima',
     telefono: '01-234-5678',
@@ -16,12 +16,54 @@ const AdminConfiguracion = () => {
     modulo_gimnasio: true,
   });
 
+  // Estados para la carga del Certificado Digital
+  const [certFile, setCertFile] = useState(null);
+  const [certPassword, setCertPassword] = useState('');
+  const [certUploading, setCertUploading] = useState(false);
+  const [certStatus, setCertStatus] = useState(null);
+
   const [saved, setSaved] = useState(false);
 
   const handleSave = (e) => {
     e.preventDefault();
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
+  };
+
+  const handleCertUpload = async (e) => {
+    e.preventDefault();
+    if (!certFile || !certPassword) {
+      setCertStatus({ type: 'error', msg: 'Seleccione un archivo (.p12/.pfx) e ingrese la contraseña.' });
+      return;
+    }
+
+    setCertUploading(true);
+    setCertStatus(null);
+
+    const formData = new FormData();
+    formData.append('certificado', certFile);
+    formData.append('cert_password', certPassword);
+    formData.append('empresa_id', user.empresa_id || 1);
+
+    try {
+      const res = await fetch('/api/upload_certificate.php', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        setCertStatus({ type: 'success', msg: data.message });
+        setCertFile(null);
+        setCertPassword('');
+      } else {
+        setCertStatus({ type: 'error', msg: data.message || 'Error al guardar el certificado.' });
+      }
+    } catch (err) {
+      setCertStatus({ type: 'error', msg: 'Error de conexión con el servidor.' });
+    } finally {
+      setCertUploading(false);
+    }
   };
 
   const toggle = (key) => setConfig(c => ({ ...c, [key]: !c[key] }));
@@ -47,6 +89,64 @@ const AdminConfiguracion = () => {
             </div>
           )}
         </header>
+
+        {/* Sección: Certificado Digital SUNAT (Paso 2) */}
+        <section className="rounded-[2.5rem] p-8 space-y-6 paper-lowest border border-[var(--color-outline-variant)]/20 shadow-sm">
+          <div className="flex items-center gap-3 pb-4 border-b border-[var(--color-outline-variant)]/10">
+            <span className="material-symbols-outlined text-2xl text-[var(--color-primary)]">verified_user</span>
+            <div>
+              <h2 className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--color-primary)]">
+                Certificado Digital SUNAT (.p12 / .pfx)
+              </h2>
+              <p className="text-xs font-medium text-[var(--color-on-surface-variant)] mt-0.5">
+                Cargue el certificado de facturación electrónica correspondiente a su RUC.
+              </p>
+            </div>
+          </div>
+
+          {certStatus && (
+            <div className={`p-4 rounded-2xl text-xs font-black uppercase tracking-wider flex items-center gap-2 ${certStatus.type === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}`}>
+              <span className="material-symbols-outlined text-base">
+                {certStatus.type === 'success' ? 'check_circle' : 'error'}
+              </span>
+              {certStatus.msg}
+            </div>
+          )}
+
+          <form onSubmit={handleCertUpload} className="space-y-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div>
+                <label className={labelClass}>Archivo Certificado (.p12 o .pfx)</label>
+                <input
+                  type="file"
+                  accept=".p12, .pfx"
+                  onChange={(e) => setCertFile(e.target.files[0])}
+                  className="w-full text-xs font-bold text-[var(--color-on-surface-variant)] file:mr-4 file:py-3 file:px-4 file:rounded-xl file:border-0 file:text-[10px] file:font-black file:uppercase file:bg-[var(--color-primary)]/10 file:text-[var(--color-primary)] hover:file:bg-[var(--color-primary)]/20 cursor-pointer bg-[var(--color-surface-container-low)] border border-[var(--color-outline-variant)]/30 rounded-xl p-1"
+                />
+              </div>
+
+              <div>
+                <label className={labelClass}>Contraseña del Certificado</label>
+                <input
+                  type="password"
+                  value={certPassword}
+                  onChange={(e) => setCertPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className={inputClass}
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={certUploading}
+              className="px-8 py-3.5 rounded-2xl text-white font-black text-xs uppercase tracking-widest transition-all hover:scale-105 active:scale-95 bg-[var(--color-primary)] disabled:opacity-50 shadow-md flex items-center gap-2"
+            >
+              <span className="material-symbols-outlined text-base">cloud_upload</span>
+              {certUploading ? 'Guardando Certificado...' : 'Cargar Certificado Digital'}
+            </button>
+          </form>
+        </section>
 
         <form onSubmit={handleSave} className="space-y-8">
 

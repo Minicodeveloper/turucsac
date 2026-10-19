@@ -11,14 +11,30 @@ const Login = () => {
   const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
+
+    const documentClean = user.trim();
+
+    if (!documentClean || !password) {
+      setError('Complete todos los campos');
+      return;
+    }
+
     try {
-      const { data } = await authService.login({ nro_documento: user, password: password });
+      const { data } = await authService.login({ nro_documento: documentClean, password: password });
+      
       if (data.success) {
         localStorage.setItem('token', data.token);
         sessionStorage.setItem('usuario', JSON.stringify(data.user));
-        if (data.user && data.user.rol === 'admin') {
+
+        // Redirección inteligente según los 4 nuevos roles
+        const userRole = data.user ? data.user.rol : '';
+
+        if (userRole === 'SUPER_ADMIN') {
           navigate('/admin');
+        } else if (userRole === 'ADMIN_EMPRESA') {
+          navigate('/dashboard');
         } else {
+          // SUPERVISOR y CAJERO van al selector de módulos
           navigate('/modulos');
         }
       } else {
@@ -53,8 +69,10 @@ const Login = () => {
             <div className="relative">
               <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-[var(--outline-variant)] text-lg">id_card</span>
               <input 
-                type="text" value={user} onChange={(e) => setUser(e.target.value)}
-                placeholder="77665544"
+                type="text" 
+                value={user} 
+                onChange={(e) => setUser(e.target.value)}
+                placeholder="00000001"
                 className="w-full h-14 paper-nested rounded-2xl pl-12 pr-4 outline-none font-black text-[var(--on-secondary-fixed)] tracking-tight focus:ring-2 ring-[var(--primary-container)]/10"
               />
             </div>
@@ -65,8 +83,10 @@ const Login = () => {
             <div className="relative">
               <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-[var(--outline-variant)] text-lg">verified_user</span>
               <input 
-                type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-                placeholder="•••••"
+                type="password" 
+                value={password} 
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••"
                 className="w-full h-14 paper-nested rounded-2xl pl-12 pr-4 outline-none font-medium text-[var(--on-secondary-fixed)] focus:ring-2 ring-[var(--primary-container)]/10"
               />
             </div>
@@ -76,7 +96,7 @@ const Login = () => {
 
           <button 
             type="submit"
-            className="w-full h-16 btn-azure flex items-center justify-center gap-3 text-sm tracking-[0.2em] mt-8"
+            className="w-full h-16 btn-azure flex items-center justify-center gap-3 text-sm tracking-[0.2em] mt-8 cursor-pointer"
           >
             <span>INGRESAR</span>
             <span className="material-symbols-outlined text-sm">login</span>

@@ -11,18 +11,58 @@ $inputJSON = file_get_contents('php://input');
 $input = json_decode($inputJSON, TRUE);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $nro_documento = $input['nro_documento'] ?? '';
+    $nro_documento = trim($input['nro_documento'] ?? '');
     $password = $input['password'] ?? '';
 
     if (!empty($nro_documento) && !empty($password)) {
         try {
-            $query = "SELECT id, nro_documento, password_hash, nombre_completo, rol FROM usuarios WHERE nro_documento = :dni LIMIT 1";
+            // Traemos los datos del usuario e información de su empresa vinculada
+            $query = "SELECT u.id, u.nro_documento, u.password_hash, u.nombre_completo, u.rol, u.empresa_id, 
+                             e.razon_social, e.estado AS empresa_estado 
+                      FROM usuarios u 
+                      LEFT JOIN empresas e ON u.empresa_id = e.id 
+                      WHERE u.nro_documento = :dni LIMIT 1";
+            
             $stmt = $db->prepare($query);
             $stmt->bindParam(':dni', $nro_documento);
             $stmt->execute();
 
             if ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-                if (password_verify($password, $row['password_hash'])) {
+                
+                // Normalizar rol para evitar fallas de casing
+                $rolUsuario = strtoupper((string) $row['rol']);
+
+                // Mapeo retrocompatible si en BD dice 'ADMIN'
+                if ($rolUsuario === 'ADMIN') {
+                    $rolUsuario = 'SUPER_ADMIN';
+                }
+
+                $storedPassword = (string) $row['password_hash'];
+                $passwordVerified = password_verify($password, $storedPassword);
+                $legacyPlaintextPassword = !$passwordVerified
+                    && hash_equals($storedPassword, $password);
+
+                if ($passwordVerified || $legacyPlaintextPassword) {
+                    if ($legacyPlaintextPassword || password_needs_rehash($storedPassword, PASSWORD_BCRYPT)) {
+                        $rehashStmt = $db->prepare(
+                            "UPDATE usuarios SET password_hash = :password_hash WHERE id = :id"
+                        );
+                        $rehashStmt->execute([
+                            ':password_hash' => password_hash($password, PASSWORD_BCRYPT),
+                            ':id' => $row['id'],
+                        ]);
+                    }
+
+                    // Validar si la empresa está suspendida (se omite para el SUPER_ADMIN)
+                    if ($rolUsuario !== 'SUPER_ADMIN' && $row['empresa_estado'] === 'suspendido') {
+                        http_response_code(403);
+                        echo json_encode([
+                            "success" => false, 
+                            "message" => "Su empresa se encuentra suspendida. Contacte al administrador."
+                        ]);
+                        exit;
+                    }
+
                     $token = bin2hex(random_bytes(32));
                     $expiry = date('Y-m-d H:i:s', strtotime('+24 hours'));
 
@@ -41,7 +81,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         "user" => [
                             "id" => $row['id'],
                             "name" => $row['nombre_completo'],
-                            "rol" => $row['rol']
+                            "nombre_completo" => $row['nombre_completo'],
+                            "rol" => $rolUsuario,
+                            "role" => $rolUsuario,
+                            "empresa_id" => $row['empresa_id'],
+                            "razon_social" => $row['razon_social'] ?? 'TURUCSAC Global'
                         ],
                         "message" => "Acceso concedido"
                     ]);
@@ -62,7 +106,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         echo json_encode(["success" => false, "message" => "Datos incompletos"]);
     }
 } else {
-    // Si no es POST, ya debería haber sido filtrado por headers.php si es OPTIONS
     http_response_code(405);
     echo json_encode(["success" => false, "message" => "Método no permitido"]);
 }

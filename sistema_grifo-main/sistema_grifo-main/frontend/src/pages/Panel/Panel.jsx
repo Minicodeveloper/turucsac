@@ -9,10 +9,23 @@ const Panel = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newSection, setNewSection] = useState({ id: '', title: '', icon: '' });
 
+  // 1. Lectura de datos de sesión activa
   const user = JSON.parse(sessionStorage.getItem('usuario') || '{}');
-  const userRole = (user.rol || user.role || 'admin').toLowerCase();
+  const userRole = (user.rol || user.role || 'cajero').toLowerCase();
   const isAdmin = userRole.includes('admin');
   const navigate = useNavigate();
+
+  // 2. Detección precisa del nombre real del trabajador sin forzar ADMIN por defecto
+  const nombreTrabajador =
+    user.nombres ||
+    user.nombre_completo ||
+    user.nombre ||
+    user.trabajador ||
+    user.empleado ||
+    user.personal ||
+    user.username ||
+    user.usuario ||
+    (isAdmin ? 'Administrador' : 'Cajero');
 
   useEffect(() => {
     loadLayout();
@@ -61,8 +74,8 @@ const Panel = () => {
 
   const handleCardClick = (section) => {
     if (isEditMode) return;
-    const id = section.id.toLowerCase();
-    const title = section.title.toLowerCase();
+    const id = (section.id || '').toLowerCase();
+    const title = (section.title || '').toLowerCase();
 
     if (id === 'pos' || title.includes('venta')) navigate('/pos');
     else if (id === 'inventario' || title.includes('inventario')) navigate('/inventario');
@@ -75,7 +88,7 @@ const Panel = () => {
     else alert(`Módulo "${section.title}" — Próximamente disponible`);
   };
 
-  // Asignación de estilo operativo rápido según el tipo de módulo
+  // Asignación de diseño operativo rápido según el tipo de módulo
   const getModuleVisuals = (section) => {
     const id = (section.id || '').toLowerCase();
     const title = (section.title || '').toLowerCase();
@@ -148,7 +161,7 @@ const Panel = () => {
     <div className="min-h-screen bg-[#edf2f7] text-slate-800 font-sans flex flex-col">
       <Navbar />
 
-      {/* Sub-barra de estado operativo rápido al estilo Rapifac */}
+      {/* Sub-barra de estado operativo rápido (Estilo Rapifac / TURUCSAC) */}
       <div className="bg-[#24a0ed] text-white px-6 py-2.5 shadow-sm mt-16 md:mt-20">
         <div className="max-w-[1750px] mx-auto flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2">
@@ -167,7 +180,9 @@ const Panel = () => {
           <div className="flex items-center gap-3">
             <div className="bg-sky-800/40 px-3 py-1 rounded text-[11px] font-medium flex items-center gap-2">
               <span className="material-symbols-outlined text-sm">person</span>
-              <span>Usuario: <strong className="uppercase">{user.nombre || user.usuario || 'ADMIN'}</strong></span>
+              <span>
+                Usuario: <strong className="uppercase">{nombreTrabajador}</strong>
+              </span>
               <span className="opacity-60">|</span>
               <span className="uppercase text-[10px] font-mono bg-sky-950/40 px-1.5 py-0.2 rounded font-bold">
                 {userRole}
@@ -266,7 +281,9 @@ const Panel = () => {
 
                   {/* Icono central de gran tamaño */}
                   <div className="my-auto flex flex-col items-center">
-                    <div className={`w-16 h-16 rounded-2xl border flex items-center justify-center mb-3 transition-transform duration-200 group-hover:scale-105 ${visual.accentBg}`}>
+                    <div
+                      className={`w-16 h-16 rounded-2xl border flex items-center justify-center mb-3 transition-transform duration-200 group-hover:scale-105 ${visual.accentBg}`}
+                    >
                       <span className="material-symbols-outlined text-3xl font-light">
                         {visual.icon}
                       </span>

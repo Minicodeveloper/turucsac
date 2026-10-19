@@ -20,7 +20,7 @@ $db = $database->getConnection();
 
 try {
     // Verificar token y expiración
-    $query = "SELECT id, nro_documento, nombre_completo, rol FROM usuarios 
+    $query = "SELECT id, nro_documento, nombre_completo, rol, empresa_id FROM usuarios
               WHERE token = :token AND token_expiry > NOW() LIMIT 1";
     $stmt = $db->prepare($query);
     $stmt->bindParam(':token', $token);
@@ -31,6 +31,7 @@ try {
         define('USER_ID', $user['id']);
         define('USER_ROL', $user['rol']);
         define('USER_NAME', $user['nombre_completo']);
+        define('USER_EMPRESA_ID', $user['empresa_id']);
     } else {
         http_response_code(401);
         echo json_encode(["success" => false, "message" => "Token inválido o expirado."]);

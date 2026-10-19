@@ -13,24 +13,34 @@ const HistorialBoletas = () => {
   // Estado para modal de confirmación simple
   const [saleToDelete, setSaleToDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
-
-  useEffect(() => {
-    fetchSales();
-  }, []);
+  const requestSales = () => salesService.getAll();
 
   const fetchSales = async () => {
     setLoading(true);
     try {
-      const resp = await salesService.getAll();
-      if (resp && resp.success) {
-        setSales(resp.data || []);
-      }
+      const resp = await requestSales();
+      if (resp?.success) setSales(resp.data || []);
     } catch (err) {
       console.error('Error al cargar ventas:', err);
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    let mounted = true;
+    requestSales()
+      .then(resp => {
+        if (mounted && resp?.success) setSales(resp.data || []);
+      })
+      .catch(err => {
+        if (mounted) console.error('Error al cargar ventas:', err);
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => { mounted = false; };
+  }, []);
 
   const formatPEN = (val) => {
     const num = Number(val) || 0;
@@ -62,23 +72,42 @@ const HistorialBoletas = () => {
   }, [filteredSales]);
 
   // Manejador de descarga directa para PDF, XML y CDR
-  const handleDownloadFile = (sale, tipo = 'pdf') => {
-    const backendBase = (api.defaults.baseURL || import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+  const handleDownloadFile = async (sale, tipo = 'pdf') => {
     const param = sale.ticket_id 
       ? `ticket_id=${encodeURIComponent(sale.ticket_id)}` 
       : `id=${sale.id}`;
 
-    const url = `${backendBase}/descargar_ticket.php?${param}&tipo=${tipo}`;
-
+    const ticketWindow = tipo === 'pdf' ? window.open('about:blank', '_blank') : null;
     if (tipo === 'pdf') {
-      window.open(url, '_blank');
-    } else {
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `${tipo}_${sale.ticket_id || sale.id}`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      if (!ticketWindow) {
+        alert('Permite las ventanas emergentes para ver el comprobante.');
+        return;
+      }
+    }
+
+    try {
+      const response = await api.get(`/descargar_ticket.php?${param}&tipo=${tipo}`, {
+        responseType: 'blob'
+      });
+      const contentType = tipo === 'pdf' ? 'text/html' : response.data.type;
+      const file = new Blob([response.data], { type: contentType || 'application/octet-stream' });
+      const fileUrl = URL.createObjectURL(file);
+
+      if (ticketWindow) {
+        ticketWindow.location.href = fileUrl;
+      } else {
+        const link = document.createElement('a');
+        link.href = fileUrl;
+        link.setAttribute('download', `${tipo}_${sale.ticket_id || sale.id}`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+      window.setTimeout(() => URL.revokeObjectURL(fileUrl), 60_000);
+    } catch (err) {
+      ticketWindow?.close();
+      console.error('Error al descargar comprobante:', err);
+      alert('No se pudo descargar el comprobante.');
     }
   };
 

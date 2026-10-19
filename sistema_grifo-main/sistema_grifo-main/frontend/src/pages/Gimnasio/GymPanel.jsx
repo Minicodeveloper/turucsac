@@ -76,6 +76,18 @@ const GymPanel = () => {
   const userRole = (user.rol || user.role || 'cajero').toLowerCase();
   const isAdmin = userRole.includes('admin');
 
+  // Detección precisa del nombre del colaborador
+  const nombreTrabajador =
+    user.nombres ||
+    user.nombre_completo ||
+    user.nombre ||
+    user.trabajador ||
+    user.empleado ||
+    user.personal ||
+    user.username ||
+    user.usuario ||
+    (isAdmin ? 'Administrador' : 'Cajero');
+
   const [isEditMode, setIsEditMode] = useState(false);
   const [modules, setModules] = useState(gymModules);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -115,7 +127,7 @@ const GymPanel = () => {
     <div className="min-h-screen bg-[#edf2f7] text-slate-800 font-sans flex flex-col">
       <Navbar />
 
-      {/* Sub-barra operativa de estado (Estilo Rapifac / TURUCSAC) */}
+      {/* Sub-barra operativa de estado */}
       <div className="bg-[#24a0ed] text-white px-6 py-2.5 shadow-sm mt-16 md:mt-20">
         <div className="max-w-[1750px] mx-auto flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2">
@@ -134,7 +146,7 @@ const GymPanel = () => {
           <div className="flex items-center gap-3">
             <div className="bg-sky-800/40 px-3 py-1 rounded text-[11px] font-medium flex items-center gap-2">
               <span className="material-symbols-outlined text-sm">fitness_center</span>
-              <span>Operador: <strong className="uppercase">{user.nombre || user.usuario || 'ADMIN'}</strong></span>
+              <span>Operador: <strong className="uppercase">{nombreTrabajador}</strong></span>
               <span className="opacity-60">|</span>
               <span className="uppercase text-[10px] font-mono bg-sky-950/40 px-1.5 py-0.2 rounded font-bold">
                 {userRole}
@@ -158,7 +170,7 @@ const GymPanel = () => {
               <span>Panel Deportivo & Membresías</span>
             </h1>
             <p className="text-slate-500 text-xs font-semibold mt-0.5">
-              Control de acceso de socios, planes vigentes, entrenadores y flujo de caja[cite: 7].
+              Control de acceso de socios, planes vigentes, entrenadores y flujo de caja.
             </p>
           </div>
 
@@ -265,7 +277,7 @@ const GymPanel = () => {
           )}
         </div>
 
-        {/* Footer temático conservado */}
+        {/* Footer temático */}
         <footer className="mt-14 pt-6 border-t border-slate-200 text-center lg:text-right">
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.4em]">
             Arquitectura Centro Deportivo 2026

@@ -22,7 +22,6 @@ import Finanzas from './pages/Finanzas/Finanzas';
 import Conciliacion from './pages/Conciliacion/Conciliacion';
 import Express from './pages/Express/Express';
 import Customers from './pages/Customers/Customers';
-import Settings from './pages/Settings/Settings';
 
 // ─── Gimnasio ─────────────────────────────────────────────
 import GymPanel from './pages/Gimnasio/GymPanel';
@@ -33,65 +32,84 @@ import GymInstructores from './pages/Gimnasio/GymInstructores';
 import GymIngresos from './pages/Gimnasio/GymIngresos';
 import GymConfiguracion from './pages/Gimnasio/GymConfiguracion';
 
-// ─── Guards ───────────────────────────────────────────────
+// ─── Guards Resilient a Mayúsculas y Minúsculas ───────────
+
+// 1. Guard Autenticado Básico
 const ProtectedRoute = ({ children }) => {
-  const user = sessionStorage.getItem('usuario');
-  if (!user) return <Navigate to="/login" replace />;
+  const userStr = sessionStorage.getItem('usuario');
+  if (!userStr) return <Navigate to="/login" replace />;
   return children;
 };
 
-const AdminRoute = ({ children }) => {
-  const user = JSON.parse(sessionStorage.getItem('usuario') || '{}');
+// 2. Guard Flexible por Roles
+const RoleRoute = ({ allowedRoles, children }) => {
+  const userStr = sessionStorage.getItem('usuario');
+  if (!userStr) return <Navigate to="/login" replace />;
+
+  const user = JSON.parse(userStr);
+  
   if (!user.id) return <Navigate to="/login" replace />;
-  if (user.rol !== 'admin') return <Navigate to="/modulos" replace />;
+
+  // Normalizar el rol a mayúsculas
+  const currentRole = (user.rol || user.role || '').toUpperCase();
+
+  // Mapear equivalencias legacy
+  const normalizedAllowed = allowedRoles.map(r => r.toUpperCase());
+  if (normalizedAllowed.includes('SUPER_ADMIN')) normalizedAllowed.push('ADMIN');
+  if (normalizedAllowed.includes('ADMIN_EMPRESA')) normalizedAllowed.push('ADMIN');
+
+  // Si el rol no está permitido, redirige dinámicamente según su jerarquía
+  if (!normalizedAllowed.includes(currentRole)) {
+    if (['SUPER_ADMIN', 'ADMIN'].includes(currentRole)) {
+      return <Navigate to="/admin" replace />;
+    }
+    if (currentRole === 'ADMIN_EMPRESA') {
+      return <Navigate to="/dashboard" replace />;
+    }
+    return <Navigate to="/modulos" replace />;
+  }
+
   return children;
 };
 
-// Rutas solo para operativos (bloquea admin)
-const OperatorRoute = ({ children }) => {
-  const user = JSON.parse(sessionStorage.getItem('usuario') || '{}');
-  if (!user.id) return <Navigate to="/login" replace />;
-  if (user.rol === 'admin') return <Navigate to="/admin" replace />;
-  return children;
-};
-
+// Alias de conveniencia
 const P = ({ children }) => <ProtectedRoute>{children}</ProtectedRoute>;
-const A = ({ children }) => <AdminRoute>{children}</AdminRoute>;
-const O = ({ children }) => <OperatorRoute>{children}</OperatorRoute>;
+const SuperAdminOnly = ({ children }) => <RoleRoute allowedRoles={['SUPER_ADMIN', 'ADMIN']}>{children}</RoleRoute>;
+const AdminCompanyOnly = ({ children }) => <RoleRoute allowedRoles={['SUPER_ADMIN', 'ADMIN_EMPRESA', 'ADMIN']}>{children}</RoleRoute>;
+const SupervisorAndAbove = ({ children }) => <RoleRoute allowedRoles={['SUPER_ADMIN', 'ADMIN_EMPRESA', 'SUPERVISOR', 'ADMIN']}>{children}</RoleRoute>;
 
 const router = createBrowserRouter([
-  { path: '/',      element: <Landing /> },
+  { path: '/',       element: <Landing /> },
   { path: '/login', element: <Login /> },
 
-  // ─── Selector de módulos (solo cajero/supervisor) ─────
-  { path: '/modulos', element: <O><ModuleSelector /></O> },
+  // ─── Selector de Módulos (Sin bloqueos para ningún usuario logueado) ─────
+  { path: '/modulos', element: <P><ModuleSelector /></P> },
 
-  // ─── MUNDO ADMIN ─────────────────────────────────────
-  { path: '/admin',                  element: <A><AdminPanel /></A> },
-  { path: '/admin/usuarios',         element: <A><AdminUsuarios /></A> },
-  { path: '/admin/configuracion',    element: <A><AdminConfiguracion /></A> },
-  // Alias legacy
+  // ─── MUNDO ADMIN Y CONFIGURACIÓN DE EMPRESA ──────────────────────────
+  { path: '/admin',               element: <SuperAdminOnly><AdminPanel /></SuperAdminOnly> },
+  { path: '/admin/usuarios',      element: <AdminCompanyOnly><AdminUsuarios /></AdminCompanyOnly> },
+  { path: '/admin/configuracion', element: <AdminCompanyOnly><AdminConfiguracion /></AdminCompanyOnly> },
 
-  // ─── MUNDO GRIFO ─────────────────────────────────────
-  { path: '/panel',      element: <P><Panel /></P> },
-  { path: '/dashboard',  element: <P><Dashboard /></P> },
+  // ─── MUNDO GRIFO ────────────────────────────────────────────────────
+  { path: '/panel',        element: <P><Panel /></P> },
+  { path: '/dashboard',    element: <SupervisorAndAbove><Dashboard /></SupervisorAndAbove> },
   { path: '/pos',          element: <P><POS /></P> },
-  { path: '/boletas',      element: <P><HistorialBoletas /></P> },
-  { path: '/compras',      element: <P><Compras /></P> },
-  { path: '/finanzas',     element: <P><Finanzas /></P> },
-  { path: '/conciliacion', element: <P><Conciliacion /></P> },
+  { path: '/boletas',      element: <SupervisorAndAbove><HistorialBoletas /></SupervisorAndAbove> },
+  { path: '/compras',      element: <SupervisorAndAbove><Compras /></SupervisorAndAbove> },
+  { path: '/finanzas',     element: <AdminCompanyOnly><Finanzas /></AdminCompanyOnly> },
+  { path: '/conciliacion', element: <SupervisorAndAbove><Conciliacion /></SupervisorAndAbove> },
   { path: '/express',      element: <P><Express /></P> },
-  { path: '/inventario',   element: <P><Inventory /></P> },
+  { path: '/inventario',   element: <SupervisorAndAbove><Inventory /></SupervisorAndAbove> },
   { path: '/clientes',     element: <P><Customers /></P> },
 
-  // ─── MUNDO GIMNASIO ──────────────────────────────────
-  { path: '/gimnasio',                    element: <P><GymPanel /></P> },
-  { path: '/gimnasio/socios',             element: <P><Gimnasio /></P> },
-  { path: '/gimnasio/planes',             element: <P><GymPlanes /></P> },
-  { path: '/gimnasio/asistencias',        element: <P><GymAsistencias /></P> },
-  { path: '/gimnasio/instructores',       element: <P><GymInstructores /></P> },
-  { path: '/gimnasio/ingresos',           element: <P><GymIngresos /></P> },
-
+  // ─── MUNDO GIMNASIO ─────────────────────────────────────────────────
+  { path: '/gimnasio',              element: <P><GymPanel /></P> },
+  { path: '/gimnasio/socios',       element: <P><Gimnasio /></P> },
+  { path: '/gimnasio/planes',       element: <AdminCompanyOnly><GymPlanes /></AdminCompanyOnly> },
+  { path: '/gimnasio/asistencias',  element: <P><GymAsistencias /></P> },
+  { path: '/gimnasio/instructores', element: <SupervisorAndAbove><GymInstructores /></SupervisorAndAbove> },
+  { path: '/gimnasio/ingresos',     element: <SupervisorAndAbove><GymIngresos /></SupervisorAndAbove> },
+  { path: '/gimnasio/configuracion',element: <AdminCompanyOnly><GymConfiguracion /></AdminCompanyOnly> },
 
 ], {
   basename: '/'

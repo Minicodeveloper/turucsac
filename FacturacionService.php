@@ -25,49 +25,133 @@ class FacturacionService
     private Company $company;
     private ?PDO $pdo = null;
 
-    public function __construct()
+    public function __construct(?int $empresaId = null)
     {
-        $this->inicializarGreenter();
+        $this->inicializarGreenter($empresaId);
     }
 
-    private function inicializarGreenter(): void
+    /**
+     * Carga el certificado digital y la información fiscal de la empresa en sesión
+     */
+    private function inicializarGreenter(?int $empresaId = null): void
     {
-        $certPath = __DIR__ . '/' . Config::get('CERT_PATH', 'storage/certs/certificado_export.pfx');
-        $certPass = Config::get('CERT_PASS', '');
+        $empresaId = $empresaId ?? ($_SESSION['empresa_id'] ?? 1);
+        $empresaConfig = $this->obtenerConfiguracionEmpresa($empresaId);
 
-        if (!file_exists($certPath)) {
-            throw new RuntimeException("No se encontró el certificado en: {$certPath}");
+        $certPath = (string) $empresaConfig['certificado_path'];
+        $certPass = $empresaConfig['certificado_pass'];
+
+        if ($certPath !== ''
+            && !str_starts_with($certPath, DIRECTORY_SEPARATOR)
+            && !str_starts_with($certPath, '\\\\')
+            && preg_match('/^[A-Za-z]:[\\\\\/]/', $certPath) !== 1) {
+            $certPath = __DIR__ . DIRECTORY_SEPARATOR . str_replace(
+                ['/', '\\'],
+                DIRECTORY_SEPARATOR,
+                $certPath
+            );
+        }
+
+        if ($certPath === '' || !is_file($certPath)) {
+            throw new RuntimeException("No se encontró el certificado digital (.p12/.pfx) para la empresa: {$empresaConfig['razon_social']}");
         }
 
         $pfxContent = file_get_contents($certPath);
+        if ($pfxContent === false) {
+            throw new RuntimeException("No se pudo leer el certificado digital de {$empresaConfig['razon_social']}.");
+        }
+
+        $pkcs12 = [];
+        if (!openssl_pkcs12_read($pfxContent, $pkcs12, (string) $certPass)
+            || empty($pkcs12['cert'])
+            || empty($pkcs12['pkey'])) {
+            throw new RuntimeException("El certificado digital o su contraseña no son válidos para {$empresaConfig['razon_social']}.");
+        }
+
+        $ruc = (string) $empresaConfig['ruc'];
+        if (!preg_match('/^\d{11}$/', $ruc)) {
+            throw new RuntimeException("El RUC configurado para {$empresaConfig['razon_social']} no tiene 11 dígitos.");
+        }
+
+        $certificateDetails = openssl_x509_parse($pkcs12['cert']);
+        $subjectText = implode(' ', array_map(
+            static fn ($value): string => is_array($value) ? implode(' ', array_map('strval', $value)) : (string) $value,
+            $certificateDetails['subject'] ?? []
+        ));
+        if (!str_contains($subjectText, $ruc)) {
+            throw new RuntimeException("El RUC de {$empresaConfig['razon_social']} no coincide con el certificado digital configurado.");
+        }
+
+        $sunatEnv = strtoupper((string) Config::get('SUNAT_ENV', 'BETA'));
+        if (in_array($sunatEnv, ['PRODUCTION', 'PRODUCCION'], true)) {
+            $sunatUser = trim((string) Config::get('SUNAT_USUARIO', ''));
+            $sunatPassword = trim((string) Config::get('SUNAT_CLAVE', ''));
+            if ($sunatUser === ''
+                || $sunatPassword === ''
+                || str_contains(strtoupper($sunatUser), 'MODDATOS')
+                || str_contains(strtoupper($sunatUser), 'TU_USUARIO')
+                || strtolower($sunatPassword) === 'moddatos'
+                || str_contains(strtoupper($sunatPassword), 'TU_CLAVE')) {
+                throw new RuntimeException('Producción SUNAT está bloqueada: configure las credenciales SOL reales en el archivo .env.');
+            }
+
+            $address = trim((string) ($empresaConfig['direccion'] ?? ''));
+            if ($address === '' || preg_match('/\b(PRUEBA|PRUEBAS|DEMO|EJEMPLO)\b/i', $address)) {
+                throw new RuntimeException('Producción SUNAT está bloqueada: configure la dirección fiscal real de la empresa.');
+            }
+        }
+
         $certificate = new X509Certificate($pfxContent, $certPass);
 
         $this->see = new See();
         $this->see->setCertificate($certificate->export(X509ContentType::PEM));
-        $this->see->setCredentials(Config::get('SUNAT_USUARIO'), Config::get('SUNAT_CLAVE'));
+        $this->see->setCredentials(
+            Config::get('SUNAT_USUARIO', 'MODDATOS'),
+            Config::get('SUNAT_CLAVE', 'moddatos')
+        );
 
-        $endpoint = (strtoupper((string) Config::get('SUNAT_ENV', 'BETA')) === 'PRODUCCION')
+        $endpoint = in_array($sunatEnv, ['PRODUCTION', 'PRODUCCION'], true)
             ? SunatEndpoints::FE_PRODUCCION
             : SunatEndpoints::FE_BETA;
 
         $this->see->setService($endpoint);
 
         $address = (new Address())
-            ->setUbigueo(Config::get('EMPRESA_UBIGEO'))
-            ->setDepartamento(Config::get('EMPRESA_DEPARTAMENTO'))
-            ->setProvincia(Config::get('EMPRESA_PROVINCIA'))
-            ->setDistrito(Config::get('EMPRESA_DISTRITO'))
+            ->setUbigueo($empresaConfig['ubigeo'] ?? Config::get('EMPRESA_UBIGEO', '150101'))
+            ->setDepartamento($empresaConfig['departamento'] ?? Config::get('EMPRESA_DEPARTAMENTO', 'LIMA'))
+            ->setProvincia($empresaConfig['provincia'] ?? Config::get('EMPRESA_PROVINCIA', 'LIMA'))
+            ->setDistrito($empresaConfig['distrito'] ?? Config::get('EMPRESA_DISTRITO', 'LIMA'))
             ->setUrbanizacion('-')
-            ->setDireccion(Config::get('EMPRESA_DIRECCION'));
+            ->setDireccion($empresaConfig['direccion'] ?? Config::get('EMPRESA_DIRECCION', 'AV. PRINCIPAL 123'));
 
         $this->company = (new Company())
-            ->setRuc(Config::get('EMPRESA_RUC'))
-            ->setRazonSocial(Config::get('EMPRESA_RAZON_SOCIAL'))
+            ->setRuc($empresaConfig['ruc'])
+            ->setRazonSocial($empresaConfig['razon_social'])
             ->setAddress($address);
+    }
+
+    /**
+     * Consulta la información de la empresa desde la BD
+     */
+    private function obtenerConfiguracionEmpresa(int $empresaId): array
+    {
+        $pdo = $this->getDbConnection();
+        $stmt = $pdo->prepare("SELECT ruc, razon_social, direccion, certificado_path, certificado_pass FROM empresas WHERE id = :id LIMIT 1");
+        $stmt->execute([':id' => $empresaId]);
+        $empresa = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$empresa) {
+            throw new RuntimeException("No existe una configuración fiscal para la empresa ID {$empresaId}.");
+        }
+
+        return $empresa;
     }
 
     public function emitirBoleta(array $data): array
     {
+        if (isset($data['empresa_id'])) {
+            $this->inicializarGreenter((int)$data['empresa_id']);
+        }
         $payload = $this->normalizarDatosVenta($data, '03');
         $invoice = $this->crearInvoice($payload, '03');
 
@@ -76,6 +160,9 @@ class FacturacionService
 
     public function emitirFactura(array $data): array
     {
+        if (isset($data['empresa_id'])) {
+            $this->inicializarGreenter((int)$data['empresa_id']);
+        }
         $payload = $this->normalizarDatosVenta($data, '01');
         $invoice = $this->crearInvoice($payload, '01');
 
@@ -84,17 +171,16 @@ class FacturacionService
 
     public function anularComprobante(array $data): array
     {
+        if (isset($data['empresa_id'])) {
+            $this->inicializarGreenter((int)$data['empresa_id']);
+        }
         $payload = $this->normalizarDatosVenta($data, '07');
         $note = $this->crearNota($payload);
 
         return $this->procesarEnvio($note, $note->getName(), $payload);
     }
 
-
-
-
-
-public function generarTicketPdf(array $data, array $resultado): array
+    public function generarTicketPdf(array $data, array $resultado): array
     {
         $qrData = $this->buildQrPayload($data, $resultado);
         $ticketDir = __DIR__ . '/storage/tickets';
@@ -131,12 +217,6 @@ public function generarTicketPdf(array $data, array $resultado): array
         ];
     }
 
-
-
-
-
-
-
     public function generarCorrelativo(string $serie, string $tipoComprobante = 'Boleta'): int
     {
         try {
@@ -163,6 +243,7 @@ public function generarTicketPdf(array $data, array $resultado): array
         }
 
         $host = Config::get('DB_HOST', '127.0.0.1');
+        $port = Config::get('DB_PORT', '3307');
         $dbName = Config::get('DB_NAME', 'turucsac_db');
         $dbUser = Config::get('DB_USER', 'root');
         $dbPass = Config::get('DB_PASS', '');
@@ -172,7 +253,7 @@ public function generarTicketPdf(array $data, array $resultado): array
         }
 
         $this->pdo = new PDO(
-            "mysql:host={$host};dbname={$dbName};charset=utf8mb4",
+            "mysql:host={$host};port={$port};dbname={$dbName};charset=utf8mb4",
             $dbUser,
             $dbPass,
             [
@@ -337,6 +418,9 @@ public function generarTicketPdf(array $data, array $resultado): array
         $result = $this->see->send($document);
 
         $xmlPath = __DIR__ . '/storage/xml/' . $docName . '.xml';
+        if (!is_dir(__DIR__ . '/storage/xml')) {
+            mkdir(__DIR__ . '/storage/xml', 0777, true);
+        }
         file_put_contents($xmlPath, $this->see->getFactory()->getLastXml());
 
         if (!$result->isSuccess()) {
@@ -359,6 +443,9 @@ public function generarTicketPdf(array $data, array $resultado): array
         /** @var \Greenter\Model\Response\CdrResponse $cdr */
         $cdr = $result->getCdrResponse();
         $cdrPath = __DIR__ . '/storage/cdr/R-' . $docName . '.zip';
+        if (!is_dir(__DIR__ . '/storage/cdr')) {
+            mkdir(__DIR__ . '/storage/cdr', 0777, true);
+        }
         file_put_contents($cdrPath, $result->getCdrZip());
 
         $response = [
@@ -406,7 +493,7 @@ public function generarTicketPdf(array $data, array $resultado): array
 
     private function buildQrPayload(array $data, array $resultado): string
     {
-        $rucEmisor = Config::get('EMPRESA_RUC', '');
+        $rucEmisor = $this->company->getRuc();
         $tipoDocumento = $data['tipo_doc'] ?? '03';
         $serie = $data['serie'] ?? 'B001';
         $correlativo = $data['correlativo'] ?? '1';
@@ -423,44 +510,39 @@ public function generarTicketPdf(array $data, array $resultado): array
         ]);
     }
 
+    private function renderTicketHtml(array $data, array $resultado, string $qrData): string
+    {
+        $qrImage = (new QRCode())->render($qrData);
 
+        $mtoOperGravadas = 0.0;
+        $mtoIGV = 0.0;
+        $totalVenta = 0.0;
+        $itemsHtml = '';
 
+        foreach ($data['items'] ?? [] as $item) {
+            $cant = (float) ($item['cantidad'] ?? 0);
+            $valUnit = (float) ($item['valor_unitario'] ?? 0);
+            $precioUnit = round($valUnit * 1.18, 2);
+            $subtotalItem = round($cant * $precioUnit, 2);
+            $baseItem = round($cant * $valUnit, 2);
 
+            $mtoOperGravadas += $baseItem;
+            $mtoIGV += round($baseItem * 0.18, 2);
+            $totalVenta += $subtotalItem;
 
-            
-        private function renderTicketHtml(array $data, array $resultado, string $qrData): string
-            {
-                $qrImage = (new QRCode())->render($qrData);
-                
-                $mtoOperGravadas = 0.0;
-                $mtoIGV = 0.0;
-                $totalVenta = 0.0;
-                $itemsHtml = '';
+            $itemsHtml .= '<tr>'
+                . '<td style="padding: 2px 0;">' . htmlspecialchars((string) ($item['descripcion'] ?? 'Combustible')) . '<br>'
+                . '<small>' . number_format($cant, 3) . ' GLL x S/ ' . number_format($precioUnit, 2) . '</small></td>'
+                . '<td style="text-align: right; vertical-align: bottom;">S/ ' . number_format($subtotalItem, 2) . '</td>'
+                . '</tr>';
+        }
 
-                foreach ($data['items'] ?? [] as $item) {
-                    $cant = (float) ($item['cantidad'] ?? 0);
-                    $valUnit = (float) ($item['valor_unitario'] ?? 0);
-                    $precioUnit = round($valUnit * 1.18, 2);
-                    $subtotalItem = round($cant * $precioUnit, 2);
-                    $baseItem = round($cant * $valUnit, 2);
+        $tipoDocNombre = ($data['tipo_doc'] ?? '03') === '01' ? 'FACTURA ELECTRÓNICA' : 'BOLETA DE VENTA ELECTRÓNICA';
+        $placa = !empty($data['placa']) ? strtoupper(trim((string) $data['placa'])) : 'S/P';
+        $medioPago = !empty($data['medio_pago']) ? strtoupper(trim((string) $data['medio_pago'])) : 'EFECTIVO';
+        $cajero = !empty($data['cajero']) ? htmlspecialchars((string) $data['cajero']) : 'ISLA 01';
 
-                    $mtoOperGravadas += $baseItem;
-                    $mtoIGV += round($baseItem * 0.18, 2);
-                    $totalVenta += $subtotalItem;
-
-                    $itemsHtml .= '<tr>'
-                        . '<td style="padding: 2px 0;">' . htmlspecialchars((string) ($item['descripcion'] ?? 'Combustible')) . '<br>'
-                        . '<small>' . number_format($cant, 3) . ' GLL x S/ ' . number_format($precioUnit, 2) . '</small></td>'
-                        . '<td style="text-align: right; vertical-align: bottom;">S/ ' . number_format($subtotalItem, 2) . '</td>'
-                        . '</tr>';
-                }
-
-                $tipoDocNombre = ($data['tipo_doc'] ?? '03') === '01' ? 'FACTURA ELECTRÓNICA' : 'BOLETA DE VENTA ELECTRÓNICA';
-                $placa = !empty($data['placa']) ? strtoupper(trim((string) $data['placa'])) : 'S/P';
-                $medioPago = !empty($data['medio_pago']) ? strtoupper(trim((string) $data['medio_pago'])) : 'EFECTIVO';
-                $cajero = !empty($data['cajero']) ? htmlspecialchars((string) $data['cajero']) : 'ISLA 01';
-
-                return '<!DOCTYPE html>
+        return '<!DOCTYPE html>
         <html lang="es">
         <head>
             <meta charset="UTF-8">
@@ -503,10 +585,9 @@ public function generarTicketPdf(array $data, array $resultado): array
         </head>
         <body>
             <div class="header text-center">
-                <h3 class="bold">' . htmlspecialchars(Config::get('EMPRESA_RAZON_SOCIAL', 'TURUC S.A.C.')) . '</h3>
-                <p class="bold">R.U.C. ' . htmlspecialchars(Config::get('EMPRESA_RUC', '20613708457')) . '</p>
-                <p>' . htmlspecialchars(Config::get('EMPRESA_DIRECCION', 'AV. PRINCIPAL 123')) . '</p>
-                <p>' . htmlspecialchars(Config::get('EMPRESA_DISTRITO', 'LIMA')) . ' - ' . htmlspecialchars(Config::get('EMPRESA_PROVINCIA', 'LIMA')) . '</p>
+                <h3 class="bold">' . htmlspecialchars($this->company->getRazonSocial()) . '</h3>
+                <p class="bold">R.U.C. ' . htmlspecialchars($this->company->getRuc()) . '</p>
+                <p>' . htmlspecialchars($this->company->getAddress()->getDireccion()) . '</p>
             </div>
 
             <div class="divider"></div>
@@ -576,12 +657,7 @@ public function generarTicketPdf(array $data, array $resultado): array
             </div>
         </body>
         </html>';
-            }
-
-
-    
-
-
+    }
 
     private function sumarTotalItems(array $items): float
     {

@@ -42,6 +42,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     if ($action === 'sale') {
         $inputJSON = file_get_contents('php://input');
         $saleData = json_decode($inputJSON, TRUE);
+        if (!is_array($saleData)) {
+            http_response_code(400);
+            echo json_encode(["success" => false, "message" => "Los datos de venta no son válidos."]);
+            exit;
+        }
         
         $monto = $saleData['monto'] ?? 0;
         $combustible_nombre = $saleData['combustible'] ?? '';
@@ -53,6 +58,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         
         if ($monto > 0 && !empty($combustible_nombre)) {
             try {
+                $empresaId = USER_EMPRESA_ID;
+                if (!$empresaId) {
+                    http_response_code(403);
+                    echo json_encode(["success" => false, "message" => "El usuario no tiene una empresa asignada para registrar ventas."]);
+                    exit;
+                }
+
+                $companyStmt = $db->prepare(
+                    "SELECT id, razon_social, ruc, direccion FROM empresas WHERE id = :empresa_id AND estado = 'activo' LIMIT 1"
+                );
+                $companyStmt->execute([':empresa_id' => $empresaId]);
+                $company = $companyStmt->fetch(PDO::FETCH_ASSOC);
+                if (!$company) {
+                    http_response_code(403);
+                    echo json_encode(["success" => false, "message" => "La empresa del usuario no existe o está suspendida."]);
+                    exit;
+                }
+
+                $sellerStmt = $db->prepare("SELECT id, nro_documento, nombre_completo FROM usuarios WHERE id = :id LIMIT 1");
+                $sellerStmt->execute([':id' => USER_ID]);
+                $seller = $sellerStmt->fetch(PDO::FETCH_ASSOC);
+                if (!$seller) {
+                    http_response_code(401);
+                    echo json_encode(["success" => false, "message" => "No se pudo validar al usuario que registra la venta."]);
+                    exit;
+                }
+
                 // 1. Obtener el ID del Combustible basándonos en su nombre
                 $queryComb = "SELECT id FROM combustibles WHERE nombre_producto = :nombre LIMIT 1";
                 $stmtComb = $db->prepare($queryComb);
@@ -80,19 +112,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                     }
 
                     // 3. Insertar venta
-                    $insertVenta = "INSERT INTO ventas (ticket_id, combustible_id, galones, monto_total, cliente_id, placa, metodo_pago, tipo_comprobante) 
-                                    VALUES (:ticket, :cid, :gal, :monto, :clid, :placa, :pago, :comp)";
+                    $insertVenta = "INSERT INTO ventas
+                                        (ticket_id, combustible_id, galones, monto_total, cliente_id, placa,
+                                         metodo_pago, tipo_comprobante, empresa_id, usuario_id)
+                                    VALUES
+                                        (:ticket, :cid, :gal, :monto, :clid, :placa,
+                                         :pago, :comp, :empresa_id, :usuario_id)";
                     $stmtVenta = $db->prepare($insertVenta);
-                    $stmtVenta->bindParam(':ticket', $ticket_id);
-                    $stmtVenta->bindParam(':cid', $combustible_id);
-                    $stmtVenta->bindParam(':gal', $galones);
-                    $stmtVenta->bindParam(':monto', $monto);
-                    $stmtVenta->bindParam(':clid', $cId);
-                    $stmtVenta->bindParam(':placa', $placa);
-                    $stmtVenta->bindParam(':pago', $metodo_pago);
-                    $stmtVenta->bindParam(':comp', $tipo_comprobante);
-                    
-                    if($stmtVenta->execute()){
+                    $stmtVenta->execute([
+                        ':ticket' => $ticket_id,
+                        ':cid' => $combustible_id,
+                        ':gal' => $galones,
+                        ':monto' => $monto,
+                        ':clid' => $cId,
+                        ':placa' => $placa,
+                        ':pago' => $metodo_pago,
+                        ':comp' => $tipo_comprobante,
+                        ':empresa_id' => $empresaId,
+                        ':usuario_id' => USER_ID,
+                    ]);
+
+                    if($stmtVenta->rowCount() > 0){
                         // 3. Obtener stock actual antes de deducir
                         $stmtS = $db->prepare("SELECT stock_galones FROM combustibles WHERE id = :cid FOR UPDATE");
                         $stmtS->execute([':cid' => $combustible_id]);
@@ -132,6 +172,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                         echo json_encode([
                             "success" => true,
                             "ticket_id" => $ticket_id,
+                            "company" => [
+                                "razon_social" => $company['razon_social'],
+                                "ruc" => $company['ruc'],
+                                "direccion" => $company['direccion'],
+                            ],
+                            "seller" => [
+                                "nombre_completo" => $seller['nombre_completo'],
+                                "nro_documento" => $seller['nro_documento'],
+                            ],
                             "sunat" => [
                                 "hash" => $hash,
                                 "signature" => substr($signature, 0, 40),
@@ -151,6 +200,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                 }
 
             } catch (PDOException $e) {
+                if ($db->inTransaction()) {
+                    $db->rollBack();
+                }
+                error_log('Error al procesar venta: ' . $e->getMessage());
                 http_response_code(500);
                 echo json_encode(["success" => false, "message" => "Error al procesar la venta en la base de datos."]);
             }

@@ -1,6 +1,8 @@
         <?php
         // api/descargar_ticket.php
+        require_once __DIR__ . '/config/headers.php';
         require_once __DIR__ . '/config/database.php';
+        require_once __DIR__ . '/config/auth_middleware.php';
 
         $ticket_id = $_GET['ticket_id'] ?? '';
         $id = $_GET['id'] ?? '';
@@ -16,28 +18,42 @@
 
         $venta = null;
         try {
-            // Consulta extendida con datos de cliente si existen
-            $query = "SELECT v.*, c.numero_documento AS cliente_doc, c.razon_social AS cliente_nombre 
-                    FROM ventas v 
-                    LEFT JOIN clientes c ON v.cliente_id = c.id 
-                    WHERE " . (!empty($ticket_id) ? "v.ticket_id = :val" : "v.id = :val") . " LIMIT 1";
-            
+            $query = "SELECT v.*, c.documento AS cliente_doc, c.razon_social AS cliente_nombre,
+                             f.nombre_producto, f.precio_por_galon,
+                             e.razon_social AS empresa_nombre, e.ruc AS empresa_ruc, e.direccion AS empresa_direccion,
+                             u.nro_documento AS vendedor_documento, u.nombre_completo AS vendedor_nombre
+                      FROM ventas v
+                      LEFT JOIN clientes c ON v.cliente_id = c.id
+                      LEFT JOIN combustibles f ON v.combustible_id = f.id
+                      LEFT JOIN empresas e ON v.empresa_id = e.id
+                      LEFT JOIN usuarios u ON v.usuario_id = u.id
+                      WHERE " . (!empty($ticket_id) ? "v.ticket_id = :val" : "v.id = :val");
+            if (strtoupper((string) USER_ROL) !== 'SUPER_ADMIN') {
+                $query .= " AND v.empresa_id = :empresa_id";
+            }
+            $query .= " LIMIT 1";
+
             $stmt = $db->prepare($query);
-            $stmt->execute([':val' => !empty($ticket_id) ? $ticket_id : $id]);
+            $params = [':val' => !empty($ticket_id) ? $ticket_id : $id];
+            if (strtoupper((string) USER_ROL) !== 'SUPER_ADMIN') {
+                $params[':empresa_id'] = USER_EMPRESA_ID;
+            }
+            $stmt->execute($params);
             $venta = $stmt->fetch(PDO::FETCH_ASSOC);
-        } catch (Exception $e) {
-            // Si la tabla clientes no tiene esa relación, busca directo en ventas
-            $stmt = $db->prepare("SELECT * FROM ventas WHERE " . (!empty($ticket_id) ? "ticket_id = :val" : "id = :val") . " LIMIT 1");
-            $stmt->execute([':val' => !empty($ticket_id) ? $ticket_id : $id]);
-            $venta = $stmt->fetch(PDO::FETCH_ASSOC);
+        } catch (PDOException $e) {
+            error_log('Error al cargar comprobante: ' . $e->getMessage());
+            http_response_code(500);
+            die("No se pudo cargar el comprobante.");
         }
 
-        if (!$venta) {
+        if (!$venta || empty($venta['empresa_ruc']) || empty($venta['empresa_nombre'])) {
             http_response_code(404);
-            die("Comprobante no encontrado en la base de datos.");
+            die("Comprobante no encontrado o sin empresa emisora asignada.");
         }
 
-        $rucEmisor = "20613708457";
+        $rucEmisor = $venta['empresa_ruc'];
+        $nombreEmisor = $venta['empresa_nombre'];
+        $direccionEmisor = $venta['empresa_direccion'] ?? '';
         $serie = $venta['serie'] ?? 'B001';
         $correlativoNumero = ltrim($venta['correlativo'] ?? ($venta['id'] ?? '1'), '0');
         $correlativoCompleto = str_pad($correlativoNumero, 8, '0', STR_PAD_LEFT);
@@ -95,7 +111,7 @@
                             <cbc:ID schemeID="6">' . $rucEmisor . '</cbc:ID>
                         </cac:PartyIdentification>
                         <cac:PartyLegalEntity>
-                            <cbc:RegistrationName>TURUC S.A.C.</cbc:RegistrationName>
+                            <cbc:RegistrationName>' . htmlspecialchars($nombreEmisor, ENT_XML1 | ENT_QUOTES, 'UTF-8') . '</cbc:RegistrationName>
                         </cac:PartyLegalEntity>
                     </cac:Party>
                 </cac:AccountingSupplierParty>
@@ -195,40 +211,22 @@
         // ==========================================
         $ticketNombre = !empty($venta['ticket_id']) ? $venta['ticket_id'] : $ticket_id;
 
-        // Revisar si existe archivo PDF estático en disco
-        $posiblesPdf = [
-            __DIR__ . "/storage/tickets/{$ticketNombre}.pdf",
-            __DIR__ . "/../storage/tickets/{$ticketNombre}.pdf",
-            __DIR__ . "/uploads/tickets/{$ticketNombre}.pdf",
-            __DIR__ . "/../uploads/tickets/{$ticketNombre}.pdf"
-        ];
-        if (!empty($venta['pdf_path'])) {
-            array_unshift($posiblesPdf, $venta['pdf_path']);
-            array_unshift($posiblesPdf, __DIR__ . '/' . ltrim($venta['pdf_path'], '/'));
-        }
-        foreach ($posiblesPdf as $rutaPdf) {
-            if (file_exists($rutaPdf) && is_file($rutaPdf)) {
-                header('Content-Type: application/pdf');
-                header('Content-Disposition: inline; filename="' . basename($rutaPdf) . '"');
-                header('Content-Length: ' . filesize($rutaPdf));
-                readfile($rutaPdf);
-                exit;
-            }
-        }
-
-        // Datos formateados idénticos a la boleta oficial
+        // Render from current sale/company/user records so no cached ticket leaks stale tenant data.
         $fecha = !empty($venta['fecha_venta']) ? date('d/m/Y, H:i:s', strtotime($venta['fecha_venta'])) : date('d/m/Y, H:i:s');
         $montoTotal = number_format((float)($venta['monto_total'] ?? 0), 2);
         $producto = strtoupper($venta['nombre_producto'] ?? 'REGULAR');
-        $precioUnit = number_format((float)($venta['precio_unitario'] ?? 18.90), 2);
-        $cantidad = !empty($venta['cantidad']) ? number_format((float)$venta['cantidad'], 3) : number_format((float)$montoTotal / (float)$precioUnit, 3);
+        $precioUnit = number_format((float)($venta['precio_por_galon'] ?? 0), 2);
+        $cantidad = number_format((float)($venta['galones'] ?? 0), 3);
         $placa = !empty($venta['placa']) ? strtoupper($venta['placa']) : 'ABC-123';
-        $vendedor = !empty($venta['usuario_id']) ? $venta['usuario_id'] : '11223344';
-        $clienteDoc = !empty($venta['cliente_doc']) ? $venta['cliente_doc'] : (!empty($venta['numero_documento']) ? $venta['numero_documento'] : '12345678');
-        $clienteNom = !empty($venta['cliente_nombre']) ? $venta['cliente_nombre'] : (!empty($venta['nombre_cliente']) ? $venta['nombre_cliente'] : 'CLIENTE GENERAL');
+        $vendedor = !empty($venta['vendedor_documento'])
+            ? $venta['vendedor_documento']
+            : (!empty($venta['vendedor_nombre']) ? $venta['vendedor_nombre'] : 'No registrado');
+        $clienteDoc = $venta['cliente_doc'] ?? '00000000';
+        $clienteNom = $venta['cliente_nombre'] ?? 'CLIENTE GENERAL';
 
         $qrPayload = urlencode("{$rucEmisor}|{$tipoDoc}|{$serie}|{$correlativoNumero}|0.00|{$montoTotal}|" . date('Y-m-d', strtotime($fecha)) . "|1|{$clienteDoc}");
         $qrUrl = "https://api.qrserver.com/v1/create-qr-code/?size=130x130&data={$qrPayload}";
+        header('Content-Type: text/html; charset=UTF-8');
         ?>
 
 
@@ -278,14 +276,12 @@
 
         <div class="ticket">
         <div class="text-center">
-            <div class="title bold">TURUC S.A.C.</div>
-            <div class="subtitle">Venta al mejor Precio</div>
-            <div class="subtitle">Cel. 955 114 219 - 960 466 647</div>
-            <div class="subtitle">ventas@turucsac.pe</div>
-            <div class="subtitle">Av. Principal N° 123, Urb. Industrial</div>
-            <div class="subtitle">Lima - Lima - Lima</div>
+            <div class="title bold"><?php echo htmlspecialchars($nombreEmisor, ENT_QUOTES, 'UTF-8'); ?></div>
+            <?php if ($direccionEmisor !== ''): ?>
+            <div class="subtitle"><?php echo nl2br(htmlspecialchars($direccionEmisor, ENT_QUOTES, 'UTF-8')); ?></div>
+            <?php endif; ?>
             
-            <div class="ruc bold">RUC: <?php echo $rucEmisor; ?></div>
+            <div class="ruc bold">RUC: <?php echo htmlspecialchars($rucEmisor, ENT_QUOTES, 'UTF-8'); ?></div>
             <div class="doc-type bold">BOLETA DE VENTA</div>
             <div class="bold" style="font-size: 11px;"><?php echo htmlspecialchars($ticketNombre); ?></div>
         </div>

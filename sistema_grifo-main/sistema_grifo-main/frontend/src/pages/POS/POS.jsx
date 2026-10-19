@@ -27,51 +27,51 @@ const POS = () => {
   const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
-    loadPrices();
+    let mounted = true;
+    posService.getPrices()
+      .then(resp => {
+        if (mounted && resp?.success) setPrices(resp.data);
+      })
+      .catch(err => {
+        if (mounted) console.error('Error al cargar precios:', err);
+      });
+    return () => { mounted = false; };
   }, []);
 
-  // Observación 4: Búsqueda dinámica. Si existe se carga, si no, queda libre
   useEffect(() => {
     const docClean = dni.trim();
-    if (docClean.length === 8 || docClean.length === 11) {
-      lookupCustomer(docClean);
-    } else if (docClean.length === 0) {
-      setCustomerName('CLIENTES VARIOS');
-      setIsCustomerFound(false);
-    } else {
-      // Cliente libre digitando su documento
-      setCustomerName('CLIENTE LIBRE');
-      setIsCustomerFound(false);
-    }
+    if (docClean.length !== 8 && docClean.length !== 11) return undefined;
+
+    let mounted = true;
+    customerService.searchByDoc(docClean)
+      .then(resp => {
+        if (!mounted) return;
+        if (resp?.success && resp.data) {
+          setCustomerName(resp.data.razon_social || resp.data.nombre);
+          setIsCustomerFound(true);
+          setDocType(docClean.length === 11 ? 'Factura Electrónica' : 'Boleta de Venta');
+        } else {
+          setCustomerName('CLIENTES VARIOS');
+          setIsCustomerFound(false);
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setCustomerName('CLIENTES VARIOS');
+          setIsCustomerFound(false);
+        }
+      });
+    return () => { mounted = false; };
   }, [dni]);
 
-  const loadPrices = async () => {
-    try {
-      const resp = await posService.getPrices();
-      if (resp && resp.success) setPrices(resp.data);
-    } catch (err) {
-      console.error('Error al cargar precios:', err);
-    }
-  };
-
-  const lookupCustomer = async (doc) => {
-    try {
-      const resp = await customerService.searchByDoc(doc);
-      if (resp && resp.success && resp.data) {
-        setCustomerName(resp.data.razon_social || resp.data.nombre);
-        setIsCustomerFound(true);
-        if (doc.length === 11) {
-          setDocType('Factura Electrónica');
-        } else {
-          setDocType('Boleta de Venta');
-        }
-      } else {
-        // No está en la BD: se permite como cliente libre con su DNI digitado
-        setCustomerName('CLIENTES VARIOS');
-        setIsCustomerFound(false);
-      }
-    } catch (err) {
+  const handleDniChange = (value) => {
+    setDni(value);
+    const docClean = value.trim();
+    if (docClean.length === 0) {
       setCustomerName('CLIENTES VARIOS');
+      setIsCustomerFound(false);
+    } else if (docClean.length !== 8 && docClean.length !== 11) {
+      setCustomerName('CLIENTE LIBRE');
       setIsCustomerFound(false);
     }
   };
@@ -118,7 +118,7 @@ const POS = () => {
       });
 
       if (resp && resp.success) {
-        generateTicket(resp.ticket_id, resp.sunat);
+        generateTicket(resp.ticket_id, resp.company, resp.seller);
         // Limpiar formulario tras venta exitosa
         setAmount('0.00'); 
         setDni(''); 
@@ -139,12 +139,14 @@ const POS = () => {
   };
 
   // Observación 1: Generación del ticket exactamente con el layout del PDF de referencia
-  const generateTicket = (ticketId, sunatData) => {
+  const generateTicket = (ticketId, company = {}, seller = {}) => {
     const doc = new jsPDF({ format: [80, 210], unit: 'mm' });
     const fechaActual = new Date();
     const fechaHoraStr = `${fechaActual.toLocaleDateString()}, ${fechaActual.toLocaleTimeString()}`;
-    const userSession = JSON.parse(sessionStorage.getItem('usuario') || '{}');
-    const cajero = userSession.nombre_completo || userSession.name || 'ADMIN SISTEMA GRIFOS';
+    const companyName = company.razon_social || 'Empresa no identificada';
+    const companyAddress = company.direccion || '';
+    const companyRuc = company.ruc || '';
+    const sellerDocument = seller.nro_documento || seller.nombre_completo || 'No registrado';
 
     const drawDottedLine = (y) => {
       doc.setLineDashPattern([0.8, 0.8], 0);
@@ -158,107 +160,105 @@ const POS = () => {
       return `SON: ${entero} CON ${centavos}/100 SOLES`;
     };
 
-    // Encabezado TURUC S.A.C.
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
-    doc.text("TURUC S.A.C.", 40, 9, { align: "center" });
+    doc.text(doc.splitTextToSize(companyName, 68), 40, 9, { align: "center" });
 
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7);
-    doc.text("Venta al mejor Precio", 40, 13, { align: "center" });
-    doc.text("Cel. 955 114 219 - 960 466 647", 40, 16.5, { align: "center" });
-    doc.text("ventas@turucsac.pe", 40, 20, { align: "center" });
-    doc.text("Av. Principal N° 123, Urb. Industrial", 40, 23.5, { align: "center" });
-    doc.text("Lima - Lima - Lima", 40, 27, { align: "center" });
+    if (companyAddress) {
+      doc.text(doc.splitTextToSize(companyAddress, 68), 40, 15, { align: "center" });
+    }
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
-    doc.text("RUC: 20613708457", 40, 31.5, { align: "center" });
+    doc.text(`RUC: ${companyRuc}`, 40, 22, { align: "center" });
 
     const tituloFiscal = docType.toUpperCase();
-    doc.text(tituloFiscal, 40, 35.5, { align: "center" });
-    doc.text(ticketId || "TKT-20260918-193213-1602", 40, 39.5, { align: "center" });
+    doc.text(tituloFiscal, 40, 27, { align: "center" });
+    doc.text(ticketId || "TKT", 40, 31, { align: "center" });
 
     // Bloque Adquiriente
     doc.setFontSize(7.5);
-    doc.text("ADQUIRIENTE", 5, 45);
+    doc.text("ADQUIRIENTE", 5, 37);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7);
-    doc.text(`L.E/DNI: ${dni.trim() || '00000000'}`, 5, 49);
-    doc.text(customerName.toUpperCase(), 5, 53);
+    doc.text(`L.E/DNI: ${dni.trim() || '00000000'}`, 5, 41);
+    doc.text(customerName.toUpperCase(), 5, 45);
 
     // Metadatos
     doc.setFont("helvetica", "bold");
-    doc.text(`FECHA: ${fechaHoraStr}`, 5, 60);
+    doc.text(`FECHA: ${fechaHoraStr}`, 5, 52);
     doc.setFont("helvetica", "normal");
-    doc.text(`FORMA PAGO: ${paymentMethod.toUpperCase()}`, 5, 64);
-    doc.text(`VENDEDOR: ${cajero.toUpperCase()}`, 5, 68);
+    doc.text(`FORMA PAGO: ${paymentMethod.toUpperCase()}`, 5, 56);
+    doc.text(`VENDEDOR: ${sellerDocument.toUpperCase()}`, 5, 60);
 
     // Tabla de Ítems
     doc.setFont("helvetica", "bold");
     doc.setFontSize(6.8);
-    doc.text("DESCRIPCION", 5, 74);
-    doc.text("CANT.", 34, 74);
-    doc.text("U.M.", 45, 74);
-    doc.text("PRECIO", 54, 74);
-    doc.text("IMPORTE", 75, 74, { align: "right" });
+    doc.text("DESCRIPCION", 5, 66);
+    doc.text("CANT.", 34, 66);
+    doc.text("U.M.", 45, 66);
+    doc.text("PRECIO", 54, 66);
+    doc.text("IMPORTE", 75, 66, { align: "right" });
 
-    drawDottedLine(76);
+    drawDottedLine(68);
 
     doc.setFont("helvetica", "normal");
-    doc.text(selectedFuel.name.toUpperCase(), 5, 81);
-    doc.text(`${gallons}`, 34, 85);
-    doc.text("GLI", 45, 85);
-    doc.text(`${currentPrice.toFixed(2)}`, 54, 85);
-    doc.text(`${numAmount.toFixed(2)}`, 75, 85, { align: "right" });
+    doc.text(selectedFuel.name.toUpperCase(), 5, 73);
+    doc.text(`${gallons}`, 34, 77);
+    doc.text("GLI", 45, 77);
+    doc.text(`${currentPrice.toFixed(2)}`, 54, 77);
+    doc.text(`${numAmount.toFixed(2)}`, 75, 77, { align: "right" });
 
-    drawDottedLine(88);
+    drawDottedLine(80);
 
     // Total
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
-    doc.text("TOTAL S/", 45, 93);
-    doc.text(`${numAmount.toFixed(2)}`, 75, 93, { align: "right" });
+    doc.text("TOTAL S/", 45, 85);
+    doc.text(`${numAmount.toFixed(2)}`, 75, 85, { align: "right" });
 
-    drawDottedLine(96);
+    drawDottedLine(88);
 
     doc.setFont("helvetica", "normal");
     doc.setFontSize(6.8);
-    doc.text(numeroALetras(numAmount), 40, 100.5, { align: "center" });
+    doc.text(numeroALetras(numAmount), 40, 92.5, { align: "center" });
 
-    drawDottedLine(103);
+    drawDottedLine(95);
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(7.5);
-    doc.text(`${paymentMethod.toUpperCase()} S/ ${numAmount.toFixed(2)}`, 5, 107.5);
+    doc.text(`${paymentMethod.toUpperCase()} S/ ${numAmount.toFixed(2)}`, 5, 100);
 
-    drawDottedLine(110);
+    drawDottedLine(103);
 
     // Placa
-    doc.text(`PLACA: ${plate.toUpperCase().trim() || 'S/P'}`, 5, 114.5);
+    doc.text(`PLACA: ${plate.toUpperCase().trim() || 'S/P'}`, 5, 108);
 
-    drawDottedLine(117);
+    drawDottedLine(111);
 
     // Pie legal SUNAT
     doc.setFont("helvetica", "normal");
     doc.setFontSize(6);
-    doc.text("Representación impresa de la Boleta de Venta Electrónica", 40, 121, { align: "center" });
-    doc.text("Autorizado mediante Resolución de Intendencia", 40, 124.5, { align: "center" });
-    doc.text("N° 094-005-0001933/SUNAT", 40, 128, { align: "center" });
+    doc.text("Representación impresa del comprobante electrónico", 40, 115, { align: "center" });
+    doc.text("Comprobante registrado en el sistema", 40, 118.5, { align: "center" });
 
     // Código QR
-    const qrData = `20613708457|${docType === 'Factura Electrónica' ? '01' : '03'}|${ticketId}|0.00|${numAmount.toFixed(2)}|${fechaActual.toISOString().split('T')[0]}|${dni || '00000000'}|`;
+    const qrData = `${companyRuc}|${docType === 'Factura Electrónica' ? '01' : '03'}|${ticketId}|0.00|${numAmount.toFixed(2)}|${fechaActual.toISOString().split('T')[0]}|${dni || '00000000'}|`;
     const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(qrData)}`;
 
     try {
-      doc.addImage(qrUrl, "PNG", 28, 131, 24, 24);
-    } catch (e) {}
+      doc.addImage(qrUrl, "PNG", 28, 122, 24, 24);
+    } catch (error) {
+      console.warn('No se pudo agregar el código QR al comprobante.', error);
+    }
 
     doc.setFontSize(6.5);
     doc.setFont("helvetica", "bold");
-    doc.text("Emitido desde WWW.TURUCSAC.PE", 40, 160, { align: "center" });
+    doc.text("Emitido desde el sistema TURUCSAC", 40, 151, { align: "center" });
     doc.setFont("helvetica", "normal");
-    doc.text("GRACIAS POR SU PREFERENCIA...", 40, 164, { align: "center" });
+    doc.text("GRACIAS POR SU PREFERENCIA...", 40, 155, { align: "center" });
 
     doc.save(`${ticketId || 'ticket'}.pdf`);
   };
@@ -355,7 +355,7 @@ const POS = () => {
                 <input
                   type="text"
                   value={dni}
-                  onChange={(e) => setDni(e.target.value)}
+                  onChange={(e) => handleDniChange(e.target.value)}
                   className="h-9 border border-slate-300 rounded px-2.5 font-black text-sm outline-none focus:border-[#24a0ed]"
                   placeholder="DNI (8 dígitos) o RUC (11 dígitos)"
                 />

@@ -1,8 +1,11 @@
 <?php
 // api/pos.php
 require_once __DIR__ . '/config/headers.php';
+require_once dirname(__DIR__, 3) . '/config.php';
+Config::load();
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/config/auth_middleware.php';
+require_once dirname(__DIR__, 3) . '/FacturacionService.php';
 
 $database = new Database();
 $db = $database->getConnection();
@@ -53,10 +56,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         $galones = $saleData['galones'] ?? 0;
         $cliente_dni = $saleData['cliente_dni'] ?? '00000000';
         $placa = $saleData['placa'] ?? '';
-        $metodo_pago = $saleData['metodo_pago'] ?? 'Efectivo';
+        $metodo_pago = trim((string) ($saleData['metodo_pago'] ?? $saleData['forma_pago'] ?? 'Efectivo'));
+        if ($metodo_pago === '') {
+            $metodo_pago = 'Efectivo';
+        }
         $tipo_comprobante = $saleData['tipo_comprobante'] ?? 'Boleta';
+
+        if (!in_array($tipo_comprobante, ['Boleta de Venta', 'Factura Electrónica', 'Nota de Venta'], true)) {
+            http_response_code(422);
+            echo json_encode(["success" => false, "message" => "Tipo de comprobante no válido."]);
+            exit;
+        }
         
-        if ($monto > 0 && !empty($combustible_nombre)) {
+        if ($monto > 0 && $galones > 0 && !empty($combustible_nombre)) {
             try {
                 $empresaId = USER_EMPRESA_ID;
                 if (!$empresaId) {
@@ -76,7 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                     exit;
                 }
 
-                $sellerStmt = $db->prepare("SELECT id, nro_documento, nombre_completo FROM usuarios WHERE id = :id LIMIT 1");
+                $sellerStmt = $db->prepare("SELECT id, nro_documento, nombre_completo, rol FROM usuarios WHERE id = :id LIMIT 1");
                 $sellerStmt->execute([':id' => USER_ID]);
                 $seller = $sellerStmt->fetch(PDO::FETCH_ASSOC);
                 if (!$seller) {
@@ -133,6 +145,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                     ]);
 
                     if($stmtVenta->rowCount() > 0){
+                        $ventaId = (int) $db->lastInsertId();
+
                         // 3. Obtener stock actual antes de deducir
                         $stmtS = $db->prepare("SELECT stock_galones FROM combustibles WHERE id = :cid FOR UPDATE");
                         $stmtS->execute([':cid' => $combustible_id]);
@@ -164,9 +178,118 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 
                         $db->commit();
 
-                        // Simulación de Firma Digital (SUNAT/OSE)
-                        $hash = bin2hex(random_bytes(32));
-                        $signature = base64_encode(hash('sha256', $ticket_id . $hash, true));
+                        $sunat = [
+                            'success' => false,
+                            'codigo' => null,
+                            'mensaje' => 'Nota de venta interna; no se envió a SUNAT.',
+                            'serie' => null,
+                            'correlativo' => null,
+                            'pdf_disponible' => false,
+                        ];
+
+                        if ($tipo_comprobante !== 'Nota de Venta') {
+                            $docType = $tipo_comprobante === 'Factura Electrónica' ? '01' : '03';
+                            $serie = FacturacionService::resolverSerie(null, $docType);
+                            $lockName = substr(
+                                'turuc_' . hash('sha256', $empresaId . '|' . $serie),
+                                0,
+                                64
+                            );
+                            $lockAcquired = false;
+                            $correlativo = null;
+
+                            try {
+                                $lockStmt = $db->prepare('SELECT GET_LOCK(:lock_name, 15)');
+                                $lockStmt->execute([':lock_name' => $lockName]);
+                                $lockAcquired = (int) $lockStmt->fetchColumn() === 1;
+                                if (!$lockAcquired) {
+                                    throw new RuntimeException('No se pudo reservar el correlativo SUNAT; la venta quedó registrada como pendiente.');
+                                }
+
+                                $facturacion = new FacturacionService((int) $empresaId);
+                                $correlativo = $facturacion->generarCorrelativo($serie);
+                                $updateFolio = $db->prepare(
+                                    'UPDATE ventas SET serie = :serie, correlativo = :correlativo WHERE id = :id'
+                                );
+                                $updateFolio->execute([
+                                    ':serie' => $serie,
+                                    ':correlativo' => $correlativo,
+                                    ':id' => $ventaId,
+                                ]);
+
+                                $documentoCliente = preg_replace('/\D/', '', (string) $cliente_dni);
+                                $esClienteGenerico = $documentoCliente === '' || $documentoCliente === '00000000';
+                                $valorUnitario = round(((float) $monto / 1.18) / (float) $galones, 6);
+                                $payload = [
+                                    'empresa_id' => (int) $empresaId,
+                                    'venta_id' => $ventaId,
+                                    'ticket_id' => $ticket_id,
+                                    'placa' => strtoupper(trim((string) $placa)),
+                                    'medio_pago' => $metodo_pago,
+                                    'cajero' => strtoupper(trim((string) $seller['nombre_completo']))
+                                        . ' (' . strtoupper(trim((string) $seller['rol'])) . ')',
+                                    'serie' => $serie,
+                                    'correlativo' => $correlativo,
+                                    'cliente' => [
+                                        'tipo_doc' => $esClienteGenerico ? '0' : (strlen($documentoCliente) === 11 ? '6' : '1'),
+                                        'num_doc' => $esClienteGenerico ? '00000000' : $documentoCliente,
+                                        'rzn_social' => $esClienteGenerico
+                                            ? 'CLIENTES VARIOS'
+                                            : trim((string) ($saleData['cliente_nombre'] ?? '')),
+                                    ],
+                                    'items' => [[
+                                        'codigo' => (string) $combustible_id,
+                                        'unidad' => 'GLL',
+                                        'cantidad' => (float) $galones,
+                                        'descripcion' => $combustible_nombre,
+                                        'valor_unitario' => $valorUnitario,
+                                    ]],
+                                ];
+
+                                $resultado = $docType === '01'
+                                    ? $facturacion->emitirFactura($payload)
+                                    : $facturacion->emitirBoleta($payload);
+
+                                $sunat = [
+                                    'success' => (bool) ($resultado['success'] ?? false),
+                                    'codigo' => $resultado['codigo'] ?? null,
+                                    'mensaje' => $resultado['mensaje'] ?? 'SUNAT no devolvió una respuesta.',
+                                    'pdf_error' => $resultado['pdf_error'] ?? null,
+                                    'serie' => $serie,
+                                    'correlativo' => $correlativo,
+                                    'pdf_disponible' => !empty($resultado['pdf_path']) && is_file($resultado['pdf_path']),
+                                ];
+                            } catch (Throwable $e) {
+                                error_log('Error al emitir comprobante SUNAT: ' . $e->getMessage());
+                                $mensajeSunat = substr(
+                                    'No se pudo confirmar la emisión SUNAT. Verifique el estado antes de volver a emitir. ' . $e->getMessage(),
+                                    0,
+                                    255
+                                );
+                                $updatePendiente = $db->prepare(
+                                    'UPDATE ventas SET serie = :serie, correlativo = :correlativo, sunat_codigo = NULL, sunat_mensaje = :mensaje WHERE id = :id'
+                                );
+                                $updatePendiente->execute([
+                                    ':serie' => $serie,
+                                    ':correlativo' => $correlativo,
+                                    ':mensaje' => $mensajeSunat,
+                                    ':id' => $ventaId,
+                                ]);
+                                $sunat = [
+                                    'success' => false,
+                                    'codigo' => null,
+                                    'mensaje' => $mensajeSunat,
+                                    'serie' => $serie,
+                                    'correlativo' => $correlativo,
+                                    'pdf_disponible' => false,
+                                ];
+                            } finally {
+                                if ($lockAcquired) {
+                                    $releaseStmt = $db->prepare('SELECT RELEASE_LOCK(:lock_name)');
+                                    $releaseStmt->execute([':lock_name' => $lockName]);
+                                }
+                            }
+                        }
                         
                         http_response_code(200);
                         echo json_encode([
@@ -180,14 +303,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                             "seller" => [
                                 "nombre_completo" => $seller['nombre_completo'],
                                 "nro_documento" => $seller['nro_documento'],
+                                "rol" => $seller['rol'],
                             ],
-                            "sunat" => [
-                                "hash" => $hash,
-                                "signature" => substr($signature, 0, 40),
-                                "ose_status" => "ACEPTADO",
-                                "ose_message" => "Comprobante validado correctamente por OSE-TURUCSAC"
-                            ],
-                            "message" => "Venta grabada y KARDEX deducido exitosamente"
+                            "sunat" => $sunat,
+                            "message" => $tipo_comprobante === 'Nota de Venta'
+                                ? "Nota de venta guardada; no es un comprobante electrónico SUNAT."
+                                : ($sunat['success']
+                                    ? "Comprobante aceptado por SUNAT."
+                                    : "La venta quedó registrada, pero SUNAT no confirmó la emisión. Revise el estado antes de volver a emitir."),
                         ]);
                     } else {
                         $db->rollBack();

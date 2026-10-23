@@ -1,372 +1,128 @@
-        <?php
-        // api/descargar_ticket.php
-        require_once __DIR__ . '/config/headers.php';
-        require_once __DIR__ . '/config/database.php';
-        require_once __DIR__ . '/config/auth_middleware.php';
+<?php
+require_once __DIR__ . '/config/headers.php';
+require_once dirname(__DIR__, 3) . '/config.php';
+Config::load();
+require_once __DIR__ . '/config/database.php';
+require_once __DIR__ . '/config/auth_middleware.php';
 
-        $ticket_id = $_GET['ticket_id'] ?? '';
-        $id = $_GET['id'] ?? '';
-        $tipo = strtolower($_GET['tipo'] ?? 'pdf'); // Opciones: pdf, xml, cdr
+$ticketId = trim((string) ($_GET['ticket_id'] ?? ''));
+$saleId = trim((string) ($_GET['id'] ?? ''));
+$type = strtolower((string) ($_GET['tipo'] ?? 'pdf'));
 
-        if (empty($ticket_id) && empty($id)) {
-            http_response_code(400);
-            die("Comprobante no especificado.");
-        }
+if (($ticketId === '' && $saleId === '') || !in_array($type, ['pdf', 'xml', 'cdr'], true)) {
+    http_response_code(400);
+    exit('Solicitud de comprobante no válida.');
+}
 
-        $database = new Database();
-        $db = $database->getConnection();
+$database = new Database();
+$db = $database->getConnection();
+$query = "SELECT v.id, v.ticket_id, v.serie, v.correlativo, v.tipo_comprobante,
+                 v.sunat_codigo, v.sunat_xml_path, v.sunat_cdr_path, v.empresa_id,
+                 v.fecha_venta, v.monto_total, v.galones, v.placa, v.metodo_pago,
+                 c.documento AS cliente_doc, c.razon_social AS cliente_nombre,
+                 f.nombre_producto, e.razon_social AS empresa_nombre, e.ruc AS empresa_ruc,
+                 e.direccion AS empresa_direccion, u.nombre_completo AS vendedor_nombre
+          FROM ventas v
+          LEFT JOIN clientes c ON c.id = v.cliente_id
+          LEFT JOIN combustibles f ON f.id = v.combustible_id
+          LEFT JOIN empresas e ON e.id = v.empresa_id
+          LEFT JOIN usuarios u ON u.id = v.usuario_id
+          WHERE " . ($ticketId !== '' ? 'v.ticket_id = :sale_id' : 'v.id = :sale_id');
+if (strtoupper((string) USER_ROL) !== 'SUPER_ADMIN') {
+    $query .= ' AND v.empresa_id = :empresa_id';
+}
+$query .= ' LIMIT 1';
 
-        $venta = null;
-        try {
-            $query = "SELECT v.*, c.documento AS cliente_doc, c.razon_social AS cliente_nombre,
-                             f.nombre_producto, f.precio_por_galon,
-                             e.razon_social AS empresa_nombre, e.ruc AS empresa_ruc, e.direccion AS empresa_direccion,
-                             u.nro_documento AS vendedor_documento, u.nombre_completo AS vendedor_nombre
-                      FROM ventas v
-                      LEFT JOIN clientes c ON v.cliente_id = c.id
-                      LEFT JOIN combustibles f ON v.combustible_id = f.id
-                      LEFT JOIN empresas e ON v.empresa_id = e.id
-                      LEFT JOIN usuarios u ON v.usuario_id = u.id
-                      WHERE " . (!empty($ticket_id) ? "v.ticket_id = :val" : "v.id = :val");
-            if (strtoupper((string) USER_ROL) !== 'SUPER_ADMIN') {
-                $query .= " AND v.empresa_id = :empresa_id";
-            }
-            $query .= " LIMIT 1";
+$stmt = $db->prepare($query);
+$stmt->bindValue(':sale_id', $ticketId !== '' ? $ticketId : $saleId);
+if (strtoupper((string) USER_ROL) !== 'SUPER_ADMIN') {
+    $stmt->bindValue(':empresa_id', USER_EMPRESA_ID, PDO::PARAM_INT);
+}
+$stmt->execute();
+$sale = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            $stmt = $db->prepare($query);
-            $params = [':val' => !empty($ticket_id) ? $ticket_id : $id];
-            if (strtoupper((string) USER_ROL) !== 'SUPER_ADMIN') {
-                $params[':empresa_id'] = USER_EMPRESA_ID;
-            }
-            $stmt->execute($params);
-            $venta = $stmt->fetch(PDO::FETCH_ASSOC);
-        } catch (PDOException $e) {
-            error_log('Error al cargar comprobante: ' . $e->getMessage());
-            http_response_code(500);
-            die("No se pudo cargar el comprobante.");
-        }
+if (!$sale) {
+    http_response_code(404);
+    exit('Comprobante no encontrado.');
+}
 
-        if (!$venta || empty($venta['empresa_ruc']) || empty($venta['empresa_nombre'])) {
-            http_response_code(404);
-            die("Comprobante no encontrado o sin empresa emisora asignada.");
-        }
+if ($type === 'pdf' && $sale['tipo_comprobante'] === 'Nota de Venta') {
+    $escape = static fn ($value): string => htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
+    $amount = number_format((float) $sale['monto_total'], 2, '.', '');
+    $date = $sale['fecha_venta'] ? date('d/m/Y H:i', strtotime($sale['fecha_venta'])) : '';
+    header('Content-Type: text/html; charset=utf-8');
+    echo '<!doctype html><html lang="es"><meta charset="utf-8"><title>Nota de venta</title>'
+        . '<style>body{font:14px Arial;max-width:320px;margin:24px auto}.center{text-align:center}.line{border-top:1px dashed #333;margin:12px 0}</style>'
+        . '<section><header class="center"><strong>' . $escape($sale['empresa_nombre'] ?? '') . '</strong><br>'
+        . 'RUC: ' . $escape($sale['empresa_ruc'] ?? '') . '<br>' . $escape($sale['empresa_direccion'] ?? '') . '</header>'
+        . '<div class="line"></div><h3 class="center">NOTA DE VENTA INTERNA</h3>'
+        . '<p><b>NO ES COMPROBANTE ELECTRÓNICO SUNAT</b></p>'
+        . '<p>Ticket: ' . $escape($sale['ticket_id']) . '<br>Fecha: ' . $escape($date)
+        . '<br>Cliente: ' . $escape($sale['cliente_nombre'] ?? 'CLIENTES VARIOS')
+        . '<br>Documento: ' . $escape($sale['cliente_doc'] ?? '00000000')
+        . '<br>Producto: ' . $escape($sale['nombre_producto'] ?? 'Combustible')
+        . '<br>Galones: ' . $escape(number_format((float) $sale['galones'], 3))
+        . '<br>Placa: ' . $escape($sale['placa'] ?? '')
+        . '<br>Pago: ' . $escape($sale['metodo_pago'] ?? '') . '</p>'
+        . '<div class="line"></div><p><strong>TOTAL S/ ' . $escape($amount) . '</strong></p>'
+        . '<p>Vendedor: ' . $escape($sale['vendedor_nombre'] ?? '') . '</p></section>'
+        . '<script>window.onload=function(){window.print()}</script></html>';
+    exit;
+}
 
-        $rucEmisor = $venta['empresa_ruc'];
-        $nombreEmisor = $venta['empresa_nombre'];
-        $direccionEmisor = $venta['empresa_direccion'] ?? '';
-        $serie = $venta['serie'] ?? 'B001';
-        $correlativoNumero = ltrim($venta['correlativo'] ?? ($venta['id'] ?? '1'), '0');
-        $correlativoCompleto = str_pad($correlativoNumero, 8, '0', STR_PAD_LEFT);
-        $tipoDoc = ($serie[0] === 'F') ? '01' : '03'; // 01: Factura, 03: Boleta
-        $baseNombre = "{$rucEmisor}-{$tipoDoc}-{$serie}-{$correlativoNumero}";
+$sunatCode = filter_var($sale['sunat_codigo'] ?? null, FILTER_VALIDATE_INT);
+if ($sunatCode !== 0 && ($sunatCode === false || $sunatCode < 4000)) {
+    http_response_code(409);
+    exit('SUNAT no ha confirmado este comprobante; no hay archivos fiscales para descargar.');
+}
 
+$projectRoot = realpath(dirname(__DIR__, 3));
+if ($projectRoot === false) {
+    http_response_code(500);
+    exit('No se pudo localizar el almacenamiento de comprobantes.');
+}
 
+$filePath = null;
+$contentType = 'application/octet-stream';
+$fileName = '';
 
-                // ==========================================
-            // 1. DESCARGA DE XML (UBL 2.1 SUNAT)
-            // ==========================================
-            if ($tipo === 'xml') {
-                if (ob_get_length()) ob_clean(); // Limpiar cualquier salida previa
+if ($type === 'pdf') {
+    $serie = (string) ($sale['serie'] ?? '');
+    $correlativo = (int) ($sale['correlativo'] ?? 0);
+    if (!preg_match('/^[A-Z0-9]{4}$/', $serie) || $correlativo < 1) {
+        http_response_code(404);
+        exit('El comprobante aceptado no tiene una serie y correlativo válidos.');
+    }
 
-                $posiblesXml = [
-                    __DIR__ . "/storage/xml/{$baseNombre}.xml",
-                    __DIR__ . "/../storage/xml/{$baseNombre}.xml",
-                    __DIR__ . "/storage/xml/{$serie}-{$correlativoNumero}.xml",
-                    __DIR__ . "/../storage/xml/{$serie}-{$correlativoNumero}.xml"
-                ];
+    $ticketSuffix = preg_replace('/[^A-Za-z0-9_-]/', '', (string) ($sale['ticket_id'] ?? ''));
+    $matches = glob(
+        $projectRoot . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'tickets'
+        . DIRECTORY_SEPARATOR . $serie . '-' . $correlativo . '-' . $ticketSuffix . '-*.pdf'
+    );
+    $filePath = $matches[0] ?? null;
+    $contentType = 'application/pdf';
+    $fileName = $serie . '-' . $correlativo . '.pdf';
+} elseif ($type === 'xml') {
+    $filePath = (string) ($sale['sunat_xml_path'] ?? '');
+    $contentType = 'application/xml; charset=utf-8';
+    $fileName = basename($filePath);
+} else {
+    $filePath = (string) ($sale['sunat_cdr_path'] ?? '');
+    $contentType = 'application/zip';
+    $fileName = basename($filePath);
+}
 
-                foreach ($posiblesXml as $rutaXml) {
-                    if (file_exists($rutaXml) && is_file($rutaXml)) {
-                        header('Content-Description: File Transfer');
-                        header('Content-Type: application/xml; charset=utf-8');
-                        header('Content-Disposition: attachment; filename="' . basename($rutaXml) . '"');
-                        header('Content-Length: ' . filesize($rutaXml));
-                        header('Pragma: public');
-                        readfile($rutaXml);
-                        exit;
-                    }
-                }
+$resolvedPath = is_string($filePath) && $filePath !== '' ? realpath($filePath) : false;
+$rootPrefix = rtrim($projectRoot, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+if ($resolvedPath === false
+    || !is_file($resolvedPath)
+    || strncasecmp($resolvedPath, $rootPrefix, strlen($rootPrefix)) !== 0) {
+    http_response_code(404);
+    exit('El archivo fiscal real de SUNAT no está disponible.');
+}
 
-                // Generar XML al vuelo si no existe el archivo físico
-                $monto = number_format((float)($venta['monto_total'] ?? 0), 2, '.', '');
-                $opGravada = number_format((float)$monto / 1.18, 2, '.', '');
-                $igv = number_format((float)$monto - (float)$opGravada, 2, '.', '');
-                $fecha = !empty($venta['fecha_venta']) ? date('Y-m-d', strtotime($venta['fecha_venta'])) : date('Y-m-d');
-                $hora = !empty($venta['fecha_venta']) ? date('H:i:s', strtotime($venta['fecha_venta'])) : date('H:i:s');
-
-                $xmlOutput = '<?xml version="1.0" encoding="UTF-8"?>
-            <Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
-                    xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
-                    xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
-                <cbc:UBLVersionID>2.1</cbc:UBLVersionID>
-                <cbc:CustomizationID>2.0</cbc:CustomizationID>
-                <cbc:ID>' . $serie . '-' . $correlativoNumero . '</cbc:ID>
-                <cbc:IssueDate>' . $fecha . '</cbc:IssueDate>
-                <cbc:IssueTime>' . $hora . '</cbc:IssueTime>
-                <cbc:InvoiceTypeCode listID="0101">' . $tipoDoc . '</cbc:InvoiceTypeCode>
-                <cbc:DocumentCurrencyCode>PEN</cbc:DocumentCurrencyCode>
-                <cac:AccountingSupplierParty>
-                    <cac:Party>
-                        <cac:PartyIdentification>
-                            <cbc:ID schemeID="6">' . $rucEmisor . '</cbc:ID>
-                        </cac:PartyIdentification>
-                        <cac:PartyLegalEntity>
-                            <cbc:RegistrationName>' . htmlspecialchars($nombreEmisor, ENT_XML1 | ENT_QUOTES, 'UTF-8') . '</cbc:RegistrationName>
-                        </cac:PartyLegalEntity>
-                    </cac:Party>
-                </cac:AccountingSupplierParty>
-                <cac:TaxTotal>
-                    <cbc:TaxAmount currencyID="PEN">' . $igv . '</cbc:TaxAmount>
-                </cac:TaxTotal>
-                <cac:LegalMonetaryTotal>
-                    <cbc:LineExtensionAmount currencyID="PEN">' . $opGravada . '</cbc:LineExtensionAmount>
-                    <cbc:TaxInclusiveAmount currencyID="PEN">' . $monto . '</cbc:TaxInclusiveAmount>
-                    <cbc:PayableAmount currencyID="PEN">' . $monto . '</cbc:PayableAmount>
-                </cac:LegalMonetaryTotal>
-            </Invoice>';
-
-                header('Content-Description: File Transfer');
-                header('Content-Type: application/xml; charset=utf-8');
-                header('Content-Disposition: attachment; filename="' . $baseNombre . '.xml"');
-                header('Content-Length: ' . strlen($xmlOutput));
-                header('Pragma: public');
-                echo $xmlOutput;
-                exit;
-            }
-
-            // ==========================================
-            // 2. DESCARGA DE CDR (ZIP SUNAT)
-            // ==========================================
-            if ($tipo === 'cdr') {
-                if (ob_get_length()) ob_clean();
-
-                $zipFilename = "R-{$baseNombre}.zip";
-                $posiblesCdr = [
-                    __DIR__ . "/storage/cdr/{$zipFilename}",
-                    __DIR__ . "/../storage/cdr/{$zipFilename}"
-                ];
-
-                foreach ($posiblesCdr as $rutaCdr) {
-                    if (file_exists($rutaCdr) && is_file($rutaCdr)) {
-                        header('Content-Description: File Transfer');
-                        header('Content-Type: application/zip');
-                        header('Content-Disposition: attachment; filename="' . basename($rutaCdr) . '"');
-                        header('Content-Length: ' . filesize($rutaCdr));
-                        header('Pragma: public');
-                        readfile($rutaCdr);
-                        exit;
-                    }
-                }
-
-                $xmlCdrContent = '<?xml version="1.0" encoding="UTF-8"?>
-            <ApplicationResponse xmlns="urn:oasis:names:specification:ubl:schema:xsd:ApplicationResponse-2"
-                                xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
-                                xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
-                <cbc:ID>' . $baseNombre . '</cbc:ID>
-                <cbc:ResponseDate>' . date('Y-m-d') . '</cbc:ResponseDate>
-                <cac:DocumentResponse>
-                    <cac:Response>
-                        <cbc:ResponseCode>0</cbc:ResponseCode>
-                        <cbc:Description>El Comprobante numero ' . $serie . '-' . $correlativoNumero . ' ha sido aceptado por SUNAT</cbc:Description>
-                    </cac:Response>
-                </cac:DocumentResponse>
-            </ApplicationResponse>';
-
-                // Si ZipArchive está disponible, empaquetar en ZIP
-                if (class_exists('ZipArchive')) {
-                    $tempZip = tempnam(sys_get_temp_dir(), 'cdr_');
-                    $zip = new ZipArchive();
-                    if ($zip->open($tempZip, ZipArchive::CREATE | ZipArchive::OVERWRITE) === TRUE) {
-                        $zip->addFromString("R-{$baseNombre}.xml", $xmlCdrContent);
-                        $zip->close();
-
-                        header('Content-Description: File Transfer');
-                        header('Content-Type: application/zip');
-                        header('Content-Disposition: attachment; filename="' . $zipFilename . '"');
-                        header('Content-Length: ' . filesize($tempZip));
-                        header('Pragma: public');
-                        readfile($tempZip);
-                        unlink($tempZip);
-                        exit;
-                    }
-                }
-
-                // Si no está activa la extensión ZipArchive en php.ini, descargar el XML del CDR directamente
-                header('Content-Description: File Transfer');
-                header('Content-Type: application/xml; charset=utf-8');
-                header('Content-Disposition: attachment; filename="R-' . $baseNombre . '.xml"');
-                header('Content-Length: ' . strlen($xmlCdrContent));
-                header('Pragma: public');
-                echo $xmlCdrContent;
-                exit;
-            }
-
-
-
-
-
-
-        // ==========================================
-        // 3. VISTA / DESCARGA DE PDF (TICKET TÉRMICO COMPLETO)
-        // ==========================================
-        $ticketNombre = !empty($venta['ticket_id']) ? $venta['ticket_id'] : $ticket_id;
-
-        // Render from current sale/company/user records so no cached ticket leaks stale tenant data.
-        $fecha = !empty($venta['fecha_venta']) ? date('d/m/Y, H:i:s', strtotime($venta['fecha_venta'])) : date('d/m/Y, H:i:s');
-        $montoTotal = number_format((float)($venta['monto_total'] ?? 0), 2);
-        $producto = strtoupper($venta['nombre_producto'] ?? 'REGULAR');
-        $precioUnit = number_format((float)($venta['precio_por_galon'] ?? 0), 2);
-        $cantidad = number_format((float)($venta['galones'] ?? 0), 3);
-        $placa = !empty($venta['placa']) ? strtoupper($venta['placa']) : 'ABC-123';
-        $vendedor = !empty($venta['vendedor_documento'])
-            ? $venta['vendedor_documento']
-            : (!empty($venta['vendedor_nombre']) ? $venta['vendedor_nombre'] : 'No registrado');
-        $clienteDoc = $venta['cliente_doc'] ?? '00000000';
-        $clienteNom = $venta['cliente_nombre'] ?? 'CLIENTE GENERAL';
-
-        $qrPayload = urlencode("{$rucEmisor}|{$tipoDoc}|{$serie}|{$correlativoNumero}|0.00|{$montoTotal}|" . date('Y-m-d', strtotime($fecha)) . "|1|{$clienteDoc}");
-        $qrUrl = "https://api.qrserver.com/v1/create-qr-code/?size=130x130&data={$qrPayload}";
-        header('Content-Type: text/html; charset=UTF-8');
-        ?>
-
-
-        <!DOCTYPE html>
-        <html lang="es">
-        <head>
-        <meta charset="utf-8">
-        <title><?php echo htmlspecialchars($ticketNombre); ?></title>
-        <style>
-            * { box-sizing: border-box; font-family: 'Arial', sans-serif; }
-            body {
-            background: #333;
-            margin: 0;
-            padding: 20px 0;
-            display: flex;
-            justify-content: center;
-            }
-            .ticket {
-            width: 290px;
-            background: #fff;
-            padding: 15px 12px;
-            font-size: 11px;
-            color: #000;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-            }
-            .text-center { text-align: center; }
-            .bold { font-weight: bold; }
-            .title { font-size: 15px; margin: 0 0 2px 0; }
-            .subtitle { font-size: 10px; margin: 2px 0; }
-            .ruc { font-size: 12px; margin: 6px 0 2px 0; }
-            .doc-type { font-size: 12px; margin-bottom: 2px; }
-            .divider { border: none; border-top: 1px dashed #000; margin: 7px 0; }
-            .row { display: flex; justify-content: space-between; font-size: 10.5px; margin: 2px 0; }
-            table { width: 100%; border-collapse: collapse; font-size: 10px; }
-            th { border-bottom: 1px dashed #000; padding: 3px 0; }
-            td { padding: 3px 0; }
-            .total-box { font-size: 13px; font-weight: bold; margin: 6px 0; }
-            .qr-container { text-align: center; margin-top: 10px; }
-            .qr-container img { width: 125px; height: 125px; }
-            @media print {
-            body { background: transparent; padding: 0; }
-            .ticket { box-shadow: none; width: 100%; }
-            }
-        </style>
-        </head>
-        <body>
-
-        <div class="ticket">
-        <div class="text-center">
-            <div class="title bold"><?php echo htmlspecialchars($nombreEmisor, ENT_QUOTES, 'UTF-8'); ?></div>
-            <?php if ($direccionEmisor !== ''): ?>
-            <div class="subtitle"><?php echo nl2br(htmlspecialchars($direccionEmisor, ENT_QUOTES, 'UTF-8')); ?></div>
-            <?php endif; ?>
-            
-            <div class="ruc bold">RUC: <?php echo htmlspecialchars($rucEmisor, ENT_QUOTES, 'UTF-8'); ?></div>
-            <div class="doc-type bold">BOLETA DE VENTA</div>
-            <div class="bold" style="font-size: 11px;"><?php echo htmlspecialchars($ticketNombre); ?></div>
-        </div>
-
-        <div style="margin-top: 8px;">
-            <div class="bold">ADQUIRIENTE</div>
-            <div>L.E/DNI: <?php echo htmlspecialchars($clienteDoc); ?></div>
-            <div><?php echo htmlspecialchars($clienteNom); ?></div>
-        </div>
-
-        <div style="margin-top: 6px;">
-            <div><b>FECHA:</b> <?php echo $fecha; ?></div>
-            <div><b>FORMA PAGO:</b> EFECTIVO (SOLES)</div>
-            <div><b>VENDEDOR:</b> <?php echo htmlspecialchars($vendedor); ?></div>
-        </div>
-
-        <hr class="divider">
-
-        <table>
-            <thead>
-            <tr>
-                <th align="left">DESCRIPCION</th>
-                <th align="right">CANT.</th>
-                <th align="center">U.M.</th>
-                <th align="right">PRECIO</th>
-                <th align="right">IMPORTE</th>
-            </tr>
-            </thead>
-            <tbody>
-            <tr>
-                <td colspan="5" class="bold" style="padding-top:4px;"><?php echo htmlspecialchars($producto); ?></td>
-            </tr>
-            <tr>
-                <td></td>
-                <td align="right"><?php echo $cantidad; ?></td>
-                <td align="center">GLI</td>
-                <td align="right"><?php echo $precioUnit; ?></td>
-                <td align="right"><?php echo $montoTotal; ?></td>
-            </tr>
-            </tbody>
-        </table>
-
-        <hr class="divider">
-
-        <div class="row total-box">
-            <span>TOTAL S/</span>
-            <span><?php echo $montoTotal; ?></span>
-        </div>
-
-        <hr class="divider">
-        <div class="text-center" style="font-size: 9.5px; font-weight: bold;">
-            SON: <?php echo (int)$montoTotal; ?> CON 00/100 SOLES
-        </div>
-        <hr class="divider">
-
-        <div class="row bold">
-            <span>EFECTIVO (SOLES)</span>
-            <span>S/ <?php echo $montoTotal; ?></span>
-        </div>
-        <hr class="divider">
-
-        <div class="bold">PLACA: <?php echo htmlspecialchars($placa); ?></div>
-        <hr class="divider">
-
-        <div class="text-center" style="font-size: 9px; line-height: 1.2; margin-top: 6px;">
-            Representación impresa de la Boleta de Venta Electrónica<br>
-            Autorizado mediante Resolución de Intendencia<br>
-            N° 094-005-0001933/SUNAT
-        </div>
-
-        <div class="qr-container">
-            <img src="<?php echo $qrUrl; ?>" alt="QR Comprobante">
-        </div>
-
-        <div class="text-center" style="font-size: 9.5px; margin-top: 6px;">
-            <b>Emitido desde WWW.TURUCSAC.PE</b><br>
-            GRACIAS POR SU PREFERENCIA...
-        </div>
-        </div>
-
-        <script>
-        window.onload = function() {
-            window.print();
-        };
-        </script>
-
-        </body>
-        </html>
+header('Content-Type: ' . $contentType);
+header('Content-Disposition: inline; filename="' . str_replace('"', '', $fileName) . '"');
+header('Content-Length: ' . filesize($resolvedPath));
+header('X-Content-Type-Options: nosniff');
+readfile($resolvedPath);

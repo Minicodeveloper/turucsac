@@ -5,13 +5,12 @@ Config::load();
 
 try {
     $host = Config::get('DB_HOST', '127.0.0.1');
+    $port = Config::get('DB_PORT', '3307');
     $db   = Config::get('DB_NAME', 'turucsac_db');
     $user = Config::get('DB_USER', 'root');
     $pass = Config::get('DB_PASS', '');
 
-    echo "Conectando a MySQL con usuario '$user' y password: " . ($pass !== '' ? 'SI' : 'NO') . "\n";
-
-    $pdo = new PDO("mysql:host=$host;dbname=$db;charset=utf8mb4", $user, $pass, [
+    $pdo = new PDO("mysql:host=$host;port=$port;dbname=$db;charset=utf8mb4", $user, $pass, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
     ]);
 
@@ -21,7 +20,13 @@ try {
             ADD COLUMN IF NOT EXISTS sunat_codigo VARCHAR(10) DEFAULT NULL AFTER correlativo, 
             ADD COLUMN IF NOT EXISTS sunat_mensaje VARCHAR(255) DEFAULT NULL AFTER sunat_codigo, 
             ADD COLUMN IF NOT EXISTS sunat_xml_path VARCHAR(255) DEFAULT NULL AFTER sunat_mensaje, 
-            ADD COLUMN IF NOT EXISTS sunat_cdr_path VARCHAR(255) DEFAULT NULL AFTER sunat_xml_path";
+            ADD COLUMN IF NOT EXISTS sunat_cdr_path VARCHAR(255) DEFAULT NULL AFTER sunat_xml_path,
+            ADD COLUMN IF NOT EXISTS anulacion_estado VARCHAR(30) DEFAULT NULL AFTER sunat_cdr_path,
+            ADD COLUMN IF NOT EXISTS anulacion_mensaje VARCHAR(255) DEFAULT NULL AFTER anulacion_estado,
+            ADD COLUMN IF NOT EXISTS anulacion_serie VARCHAR(4) DEFAULT NULL AFTER anulacion_mensaje,
+            ADD COLUMN IF NOT EXISTS anulacion_correlativo INT(11) DEFAULT NULL AFTER anulacion_serie,
+            ADD COLUMN IF NOT EXISTS anulacion_xml_path VARCHAR(255) DEFAULT NULL AFTER anulacion_correlativo,
+            ADD COLUMN IF NOT EXISTS anulacion_cdr_path VARCHAR(255) DEFAULT NULL AFTER anulacion_xml_path";
 
     $pdo->exec($sql);
     echo "Tabla ventas actualizada correctamente.\n";

@@ -83,9 +83,13 @@ class FacturacionService
         }
 
         $sunatEnv = strtoupper((string) Config::get('SUNAT_ENV', 'BETA'));
+        $sunatUser = trim((string) Config::get('SUNAT_USUARIO', ''));
+        $sunatPassword = trim((string) Config::get('SUNAT_CLAVE', ''));
+        if (str_starts_with($sunatUser, $ruc)) {
+            $sunatUser = substr($sunatUser, strlen($ruc));
+        }
+
         if (in_array($sunatEnv, ['PRODUCTION', 'PRODUCCION'], true)) {
-            $sunatUser = trim((string) Config::get('SUNAT_USUARIO', ''));
-            $sunatPassword = trim((string) Config::get('SUNAT_CLAVE', ''));
             if ($sunatUser === ''
                 || $sunatPassword === ''
                 || str_contains(strtoupper($sunatUser), 'MODDATOS')
@@ -105,9 +109,10 @@ class FacturacionService
 
         $this->see = new See();
         $this->see->setCertificate($certificate->export(X509ContentType::PEM));
-        $this->see->setCredentials(
-            Config::get('SUNAT_USUARIO', 'MODDATOS'),
-            Config::get('SUNAT_CLAVE', 'moddatos')
+        $this->see->setClaveSOL(
+            $ruc,
+            $sunatUser !== '' ? $sunatUser : 'MODDATOS',
+            $sunatPassword !== '' ? $sunatPassword : 'moddatos'
         );
 
         $endpoint = in_array($sunatEnv, ['PRODUCTION', 'PRODUCCION'], true)
@@ -180,6 +185,73 @@ class FacturacionService
         return $this->procesarEnvio($note, $note->getName(), $payload);
     }
 
+    public function emitirNotaCreditoAnulacion(array $data): array
+    {
+        if (isset($data['empresa_id'])) {
+            $this->inicializarGreenter((int) $data['empresa_id']);
+        }
+
+        $tipoDocAfectado = (string) ($data['tipo_doc_afectado'] ?? '');
+        if (!in_array($tipoDocAfectado, ['01', '03'], true)) {
+            throw new InvalidArgumentException('Solo se pueden anular facturas y boletas electrónicas.');
+        }
+
+        $data['serie'] = $data['serie'] ?? self::resolverSerieNotaCredito($tipoDocAfectado);
+        $data['cod_motivo'] = '01';
+        $data['des_motivo'] = trim((string) ($data['des_motivo'] ?? 'ANULACION DE LA OPERACION'));
+        if ($data['des_motivo'] === '') {
+            throw new InvalidArgumentException('Debe indicar el motivo de anulación.');
+        }
+
+        $payload = $this->normalizarDatosVenta($data, '07');
+        $note = $this->crearNota($payload);
+
+        return $this->procesarEnvio($note, $note->getName(), [], false);
+    }
+
+    public static function resolverSerieNotaCredito(string $tipoDocAfectado): string
+    {
+        if (!in_array($tipoDocAfectado, ['01', '03'], true)) {
+            throw new InvalidArgumentException('Tipo de comprobante afectado no válido para una Nota de Crédito.');
+        }
+
+        $default = $tipoDocAfectado === '01' ? 'FC01' : 'BC01';
+        $serie = strtoupper(trim((string) Config::get(
+            $tipoDocAfectado === '01' ? 'SERIE_NOTA_CREDITO_FACTURA' : 'SERIE_NOTA_CREDITO_BOLETA',
+            $default
+        )));
+
+        if (!preg_match('/^[A-Z0-9]{4}$/', $serie)
+            || $serie[0] !== ($tipoDocAfectado === '01' ? 'F' : 'B')) {
+            throw new InvalidArgumentException('La serie configurada para Nota de Crédito no es válida.');
+        }
+
+        return $serie;
+    }
+
+    public static function resolverSerie(mixed $serie, string $tipoDoc): string
+    {
+        if ($serie !== null && !is_string($serie) && !is_int($serie)) {
+            throw new InvalidArgumentException('La serie del comprobante debe ser texto.');
+        }
+
+        $serie = trim((string) ($serie ?? ''));
+        $configKey = $tipoDoc === '01' ? 'SERIE_FACTURA' : 'SERIE_BOLETA';
+        if ($serie === '') {
+            $serie = trim((string) Config::get($configKey, ''));
+        }
+        if ($serie === '') {
+            $serie = $tipoDoc === '01' ? 'F001' : 'B001';
+        }
+
+        $serie = strtoupper($serie);
+        if (!preg_match('/^[A-Z0-9]{4}$/', $serie)) {
+            throw new InvalidArgumentException("La serie '{$serie}' debe tener cuatro caracteres alfanuméricos.");
+        }
+
+        return $serie;
+    }
+
     public function generarTicketPdf(array $data, array $resultado): array
     {
         $qrData = $this->buildQrPayload($data, $resultado);
@@ -189,10 +261,12 @@ class FacturacionService
             mkdir($ticketDir, 0777, true);
         }
 
+        $ticketSuffix = preg_replace('/[^A-Za-z0-9_-]/', '', (string) ($data['ticket_id'] ?? ''));
         $fileName = sprintf(
-            '%s-%s-%s.pdf',
+            '%s-%s-%s-%s.pdf',
             $data['serie'] ?? 'B001',
             $data['correlativo'] ?? '1',
+            $ticketSuffix !== '' ? $ticketSuffix : 'comprobante',
             time()
         );
 
@@ -217,23 +291,16 @@ class FacturacionService
         ];
     }
 
-    public function generarCorrelativo(string $serie, string $tipoComprobante = 'Boleta'): int
+    public function generarCorrelativo(string $serie): int
     {
-        try {
-            $pdo = $this->getDbConnection();
-            $stmt = $pdo->prepare(
-                'SELECT COALESCE(MAX(correlativo), 0) + 1 AS siguiente FROM ventas WHERE serie = :serie AND tipo_comprobante = :tipo_comprobante'
-            );
-            $stmt->execute([
-                ':serie' => $serie,
-                ':tipo_comprobante' => $tipoComprobante,
-            ]);
+        $pdo = $this->getDbConnection();
+        $stmt = $pdo->prepare(
+            'SELECT COALESCE(MAX(correlativo), 0) + 1 AS siguiente FROM ventas WHERE serie = :serie'
+        );
+        $stmt->execute([':serie' => $serie]);
 
-            $row = $stmt->fetch(PDO::FETCH_ASSOC);
-            return (int) ($row['siguiente'] ?? 1);
-        } catch (Throwable $e) {
-            return 1;
-        }
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return (int) ($row['siguiente'] ?? 1);
     }
 
     private function getDbConnection(): PDO
@@ -273,13 +340,9 @@ class FacturacionService
             'rzn_social' => $data['cliente']['rzn_social'] ?? 'CLIENTE GENERICO',
         ];
 
-        $data['serie'] = $data['serie'] ?? Config::get(
-            $tipoDoc === '01' ? 'SERIE_FACTURA' : 'SERIE_BOLETA',
-            $tipoDoc === '01' ? 'F001' : 'B001'
-        );
+        $data['serie'] = self::resolverSerie($data['serie'] ?? null, $tipoDoc);
         $data['correlativo'] = $data['correlativo'] ?? $this->generarCorrelativo(
-            $data['serie'],
-            $tipoDoc === '01' ? 'Factura' : ($tipoDoc === '03' ? 'Boleta' : 'Nota de crédito')
+            $data['serie']
         );
 
         $data['items'] = $data['items'] ?? [];
@@ -296,12 +359,6 @@ class FacturacionService
 
         $items = $this->construirItems($data['items']);
 
-        $totalVenta = array_reduce(
-            $items,
-            static fn (float $carry, SaleDetail $item): float => $carry + (float) $item->getMtoPrecioUnitario(),
-            0.00
-        );
-
         $mtoOperGravadas = 0.0;
         $mtoIGV = 0.0;
 
@@ -310,6 +367,7 @@ class FacturacionService
             $mtoOperGravadas += $base;
             $mtoIGV += round($base * 0.18, 2);
         }
+        $totalVenta = $mtoOperGravadas + $mtoIGV;
 
         $invoice = (new Invoice())
             ->setUblVersion('2.1')
@@ -332,7 +390,7 @@ class FacturacionService
             ->setLegends([
                 (new Legend())
                     ->setCode('1000')
-                    ->setValue($data['leyenda_monto'] ?? 'CIENTO DIECIOCHO CON 00/100 SOLES'),
+                    ->setValue($data['leyenda_monto'] ?? $this->generarLeyendaMonto($totalVenta)),
             ]);
 
         return $invoice;
@@ -381,7 +439,7 @@ class FacturacionService
             ->setLegends([
                 (new Legend())
                     ->setCode('1000')
-                    ->setValue($data['leyenda_monto'] ?? 'CIENTO DIECIOCHO CON 00/100 SOLES'),
+                    ->setValue($data['leyenda_monto'] ?? $this->generarLeyendaMonto($totalVenta)),
             ]);
     }
 
@@ -412,7 +470,12 @@ class FacturacionService
         return $result;
     }
 
-    private function procesarEnvio(object $document, string $docName, array $data = []): array
+    private function procesarEnvio(
+        object $document,
+        string $docName,
+        array $data = [],
+        bool $generarTicket = true
+    ): array
     {
         /** @var \Greenter\Model\Response\BillResult $result */
         $result = $this->see->send($document);
@@ -434,9 +497,8 @@ class FacturacionService
             ];
 
             $this->guardarResultadoVenta($data, $response);
-            $ticket = $this->generarTicketPdf($data, $response);
-            $response['pdf_path'] = $ticket['pdf_path'] ?? null;
-            $response['qr_data'] = $ticket['qr_data'] ?? null;
+            $response['pdf_path'] = null;
+            $response['qr_data'] = null;
             return $response;
         }
 
@@ -452,14 +514,27 @@ class FacturacionService
             'success' => true,
             'codigo' => $cdr->getCode(),
             'mensaje' => $cdr->getDescription(),
+            'aceptado' => $cdr->isAccepted(),
             'xml_path' => $xmlPath,
             'cdr_path' => $cdrPath,
         ];
 
         $this->guardarResultadoVenta($data, $response);
-        $ticket = $this->generarTicketPdf($data, $response);
-        $response['pdf_path'] = $ticket['pdf_path'] ?? null;
-        $response['qr_data'] = $ticket['qr_data'] ?? null;
+        if (!$generarTicket) {
+            $response['pdf_path'] = null;
+            $response['qr_data'] = null;
+            return $response;
+        }
+
+        try {
+            $ticket = $this->generarTicketPdf($data, $response);
+            $response['pdf_path'] = $ticket['pdf_path'] ?? null;
+            $response['qr_data'] = $ticket['qr_data'] ?? null;
+        } catch (Throwable $e) {
+            error_log('SUNAT aceptó el comprobante, pero falló la creación del PDF: ' . $e->getMessage());
+            $response['pdf_path'] = null;
+            $response['pdf_error'] = $e->getMessage();
+        }
         return $response;
     }
 
@@ -469,26 +544,24 @@ class FacturacionService
             return;
         }
 
-        try {
-            $pdo = $this->getDbConnection();
-            $sql = empty($data['venta_id'])
-                ? 'UPDATE ventas SET serie = :serie, correlativo = :correlativo, sunat_codigo = :codigo, sunat_mensaje = :mensaje, sunat_xml_path = :xml_path, sunat_cdr_path = :cdr_path WHERE ticket_id = :ticket_id'
-                : 'UPDATE ventas SET serie = :serie, correlativo = :correlativo, sunat_codigo = :codigo, sunat_mensaje = :mensaje, sunat_xml_path = :xml_path, sunat_cdr_path = :cdr_path WHERE id = :venta_id';
+        $pdo = $this->getDbConnection();
+        $useSaleId = !empty($data['venta_id']);
+        $sql = 'UPDATE ventas SET serie = :serie, correlativo = :correlativo, sunat_codigo = :codigo, sunat_mensaje = :mensaje, sunat_xml_path = :xml_path, sunat_cdr_path = :cdr_path WHERE '
+            . ($useSaleId ? 'id = :venta_id' : 'ticket_id = :ticket_id');
 
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute([
-                ':serie' => $data['serie'] ?? 'B001',
-                ':correlativo' => $data['correlativo'] ?? 1,
-                ':codigo' => $resultado['codigo'] ?? null,
-                ':mensaje' => $resultado['mensaje'] ?? null,
-                ':xml_path' => $resultado['xml_path'] ?? null,
-                ':cdr_path' => $resultado['cdr_path'] ?? null,
-                ':ticket_id' => $data['ticket_id'] ?? null,
-                ':venta_id' => $data['venta_id'] ?? null,
-            ]);
-        } catch (Throwable $e) {
-            // Ignorar para no romper la emisión si la DB no está disponible.
-        }
+        $stmt = $pdo->prepare($sql);
+        $params = [
+            ':serie' => $data['serie'] ?? 'B001',
+            ':correlativo' => $data['correlativo'] ?? 1,
+            ':codigo' => $resultado['codigo'] ?? null,
+            ':mensaje' => $resultado['mensaje'] ?? null,
+            ':xml_path' => $resultado['xml_path'] ?? null,
+            ':cdr_path' => $resultado['cdr_path'] ?? null,
+        ];
+        $params[$useSaleId ? ':venta_id' : ':ticket_id'] = $useSaleId
+            ? $data['venta_id']
+            : ($data['ticket_id'] ?? null);
+        $stmt->execute($params);
     }
 
     private function buildQrPayload(array $data, array $resultado): string
@@ -497,7 +570,7 @@ class FacturacionService
         $tipoDocumento = $data['tipo_doc'] ?? '03';
         $serie = $data['serie'] ?? 'B001';
         $correlativo = $data['correlativo'] ?? '1';
-        $total = $this->sumarTotalItems($data['items'] ?? []);
+        $total = $this->calcularTotalComprobante($data['items'] ?? []);
 
         return implode('|', [
             $rucEmisor,
@@ -539,8 +612,14 @@ class FacturacionService
 
         $tipoDocNombre = ($data['tipo_doc'] ?? '03') === '01' ? 'FACTURA ELECTRÓNICA' : 'BOLETA DE VENTA ELECTRÓNICA';
         $placa = !empty($data['placa']) ? strtoupper(trim((string) $data['placa'])) : 'S/P';
-        $medioPago = !empty($data['medio_pago']) ? strtoupper(trim((string) $data['medio_pago'])) : 'EFECTIVO';
-        $cajero = !empty($data['cajero']) ? htmlspecialchars((string) $data['cajero']) : 'ISLA 01';
+        $medioPago = strtoupper(trim((string) ($data['medio_pago'] ?? $data['metodo_pago'] ?? '')));
+        $medioPago = match ($medioPago) {
+            '', 'EFECTIVO (SOLES)', 'EFECTIVO' => 'EFECTIVO',
+            'TARJETA' => 'TARJETA',
+            'YAPE', 'PLIN', 'YAPE / PLIN' => 'YAPE / PLIN',
+            default => $medioPago,
+        };
+        $cajero = !empty($data['cajero']) ? htmlspecialchars((string) $data['cajero']) : 'NO REGISTRADO';
 
         return '<!DOCTYPE html>
         <html lang="es">
@@ -659,16 +738,75 @@ class FacturacionService
         </html>';
     }
 
-    private function sumarTotalItems(array $items): float
+    private function calcularTotalComprobante(array $items): float
     {
-        $total = 0.0;
+        $baseTotal = 0.0;
+        $igvTotal = 0.0;
 
         foreach ($items as $item) {
             $cantidad = (float) ($item['cantidad'] ?? 0);
             $valorUnitario = (float) ($item['valor_unitario'] ?? 0);
-            $total += $cantidad * $valorUnitario;
+            $base = round($cantidad * $valorUnitario, 2);
+            $baseTotal += $base;
+            $igvTotal += round($base * 0.18, 2);
         }
 
-        return round($total, 2);
+        return round($baseTotal + $igvTotal, 2);
+    }
+
+    private function generarLeyendaMonto(float $monto): string
+    {
+        $monto = round($monto, 2);
+        $entero = (int) floor($monto);
+        $centavos = (int) round(($monto - $entero) * 100);
+        if ($centavos === 100) {
+            $entero++;
+            $centavos = 0;
+        }
+        $palabras = $this->numeroALetras($entero);
+        $palabras = preg_replace('/VEINTIUNO$/', 'VEINTIUN', $palabras) ?? $palabras;
+        $palabras = preg_replace('/UNO$/', 'UN', $palabras) ?? $palabras;
+        $moneda = $entero === 1 && $centavos === 0 ? 'SOL' : 'SOLES';
+
+        return sprintf('%s CON %02d/100 %s', $palabras, $centavos, $moneda);
+    }
+
+    private function numeroALetras(int $numero): string
+    {
+        $unidades = [
+            'CERO', 'UNO', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE',
+            'DIEZ', 'ONCE', 'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISEIS', 'DIECISIETE',
+            'DIECIOCHO', 'DIECINUEVE', 'VEINTE', 'VEINTIUNO', 'VEINTIDOS', 'VEINTITRES',
+            'VEINTICUATRO', 'VEINTICINCO', 'VEINTISEIS', 'VEINTISIETE', 'VEINTIOCHO', 'VEINTINUEVE',
+        ];
+        $decenas = [30 => 'TREINTA', 40 => 'CUARENTA', 50 => 'CINCUENTA', 60 => 'SESENTA', 70 => 'SETENTA', 80 => 'OCHENTA', 90 => 'NOVENTA'];
+        $centenas = [100 => 'CIENTO', 200 => 'DOSCIENTOS', 300 => 'TRESCIENTOS', 400 => 'CUATROCIENTOS', 500 => 'QUINIENTOS', 600 => 'SEISCIENTOS', 700 => 'SETECIENTOS', 800 => 'OCHOCIENTOS', 900 => 'NOVECIENTOS'];
+
+        if ($numero < 30) {
+            return $unidades[$numero];
+        }
+        if ($numero < 100) {
+            $decena = intdiv($numero, 10) * 10;
+            return $decenas[$decena] . ($numero % 10 ? ' Y ' . $unidades[$numero % 10] : '');
+        }
+        if ($numero < 1000) {
+            $centena = intdiv($numero, 100) * 100;
+            if ($numero === 100) {
+                return 'CIEN';
+            }
+            return $centenas[$centena] . ($numero % 100 ? ' ' . $this->numeroALetras($numero % 100) : '');
+        }
+        if ($numero < 1000000) {
+            $miles = intdiv($numero, 1000);
+            return ($miles === 1 ? '' : $this->numeroALetras($miles) . ' ') . 'MIL'
+                . ($numero % 1000 ? ' ' . $this->numeroALetras($numero % 1000) : '');
+        }
+        if ($numero < 1000000000) {
+            $millones = intdiv($numero, 1000000);
+            return ($millones === 1 ? 'UN MILLON' : $this->numeroALetras($millones) . ' MILLONES')
+                . ($numero % 1000000 ? ' ' . $this->numeroALetras($numero % 1000000) : '');
+        }
+
+        throw new InvalidArgumentException('El monto supera el límite para convertirlo a letras.');
     }
 }

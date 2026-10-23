@@ -30,7 +30,8 @@ if ($method === 'GET') {
     try {
         $isSuperAdmin = strtoupper((string) USER_ROL) === 'SUPER_ADMIN';
         $query = "SELECT v.id, v.ticket_id, c.nombre_producto, v.galones, v.monto_total, v.fecha_venta,
-                         v.serie, v.correlativo, v.sunat_codigo, v.sunat_mensaje,
+                         v.serie, v.correlativo, v.tipo_comprobante, v.sunat_codigo, v.sunat_mensaje,
+                         v.anulacion_estado, v.anulacion_mensaje, v.anulacion_serie, v.anulacion_correlativo,
                          v.sunat_xml_path, v.sunat_cdr_path, v.empresa_id, v.usuario_id,
                          e.razon_social AS empresa_nombre, e.ruc AS empresa_ruc,
                          u.nro_documento AS vendedor_documento, u.nombre_completo AS vendedor_nombre
@@ -120,10 +121,36 @@ if ($method === 'DELETE' || $action === 'delete_batch' || $action === 'purge_all
         echo json_encode(["success" => false, "message" => "No se enviaron comprobantes para eliminar."]);
         exit;
     }
+    if (count($ids) > 100 || array_filter($ids, static fn ($id): bool => !is_scalar($id) || trim((string) $id) === '') !== []) {
+        http_response_code(400);
+        echo json_encode(["success" => false, "message" => "La lista de comprobantes no es válida."]);
+        exit;
+    }
 
     try {
         $placeholders = implode(',', array_fill(0, count($ids), '?'));
-        $query = "DELETE FROM ventas WHERE (id IN ($placeholders) OR ticket_id IN ($placeholders))";
+        $protectedQuery = "SELECT COUNT(*) FROM ventas WHERE (id IN ($placeholders) OR ticket_id IN ($placeholders)) AND (sunat_codigo = '0' OR CAST(sunat_codigo AS UNSIGNED) >= 4000 OR anulacion_estado IS NOT NULL)";
+        $protectedParams = array_merge($ids, $ids);
+        if (strtoupper((string) USER_ROL) !== 'SUPER_ADMIN') {
+            $protectedQuery .= " AND empresa_id = ?";
+            $protectedParams[] = USER_EMPRESA_ID;
+        }
+        $protectedStmt = $db->prepare($protectedQuery);
+        $protectedStmt->execute($protectedParams);
+        if ((int) $protectedStmt->fetchColumn() > 0) {
+            http_response_code(409);
+            echo json_encode([
+                "success" => false,
+                "message" => "Los comprobantes aceptados por SUNAT no se pueden borrar. Use el proceso de anulación.",
+            ]);
+            exit;
+        }
+
+        $query = "DELETE FROM ventas
+                  WHERE (id IN ($placeholders) OR ticket_id IN ($placeholders))
+                    AND COALESCE(sunat_codigo, '') <> '0'
+                    AND CAST(COALESCE(sunat_codigo, '0') AS UNSIGNED) < 4000
+                    AND anulacion_estado IS NULL";
         if (strtoupper((string) USER_ROL) !== 'SUPER_ADMIN') {
             $query .= " AND empresa_id = ?";
         }

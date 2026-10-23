@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Sidebar from '../../components/Sidebar';
-import { posService, customerService } from '../../services/api';
+import api, { posService, customerService } from '../../services/api';
 import { jsPDF } from 'jspdf';
 
 const fuels = [
@@ -66,13 +66,12 @@ const POS = () => {
 
   const handleDniChange = (value) => {
     setDni(value);
+    setIsCustomerFound(false);
     const docClean = value.trim();
     if (docClean.length === 0) {
       setCustomerName('CLIENTES VARIOS');
-      setIsCustomerFound(false);
     } else if (docClean.length !== 8 && docClean.length !== 11) {
       setCustomerName('CLIENTE LIBRE');
-      setIsCustomerFound(false);
     }
   };
 
@@ -99,12 +98,17 @@ const POS = () => {
       setErrorMessage('⚠️ Para emitir FACTURA ELECTRÓNICA se requiere un número de RUC válido de 11 dígitos.');
       return false;
     }
+    if (docType !== 'Nota de Venta' && dni.trim() && !isCustomerFound) {
+      setErrorMessage('⚠️ Registre y seleccione al cliente antes de emitir un comprobante electrónico.');
+      return false;
+    }
     return true;
   };
 
   const handleProcessSale = async () => {
     if (!validateBeforeProcess()) return;
 
+    const printWindow = docType === 'Nota de Venta' ? null : window.open('about:blank', '_blank');
     setIsProcessing(true);
     try {
       const resp = await posService.processSale({
@@ -112,13 +116,43 @@ const POS = () => {
         galones: gallons,
         monto: numAmount,
         cliente_dni: dni.trim() || '00000000',
+        cliente_nombre: customerName,
         placa: plate.toUpperCase().trim(),
         metodo_pago: paymentMethod,
         tipo_comprobante: docType
       });
 
       if (resp && resp.success) {
-        generateTicket(resp.ticket_id, resp.company, resp.seller);
+        if (docType === 'Nota de Venta') {
+          generateTicket(resp.ticket_id, resp.company, resp.seller);
+          alert(`Nota de venta interna guardada: ${resp.ticket_id}. No fue enviada a SUNAT.`);
+        } else if (resp.sunat?.success) {
+          let pdfOpened = false;
+          if (resp.sunat.pdf_disponible) {
+            try {
+              const response = await api.get(
+                `/descargar_ticket.php?ticket_id=${encodeURIComponent(resp.ticket_id)}&tipo=pdf`,
+                { responseType: 'blob' }
+              );
+              const fileUrl = URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+              const ticketWindow = printWindow || window.open(fileUrl, '_blank');
+              if (printWindow) printWindow.location.href = fileUrl;
+              pdfOpened = Boolean(ticketWindow);
+              window.setTimeout(() => URL.revokeObjectURL(fileUrl), 60_000);
+            } catch (error) {
+              printWindow?.close();
+              console.error('SUNAT aceptó el comprobante, pero no se pudo abrir el PDF.', error);
+            }
+          } else {
+            printWindow?.close();
+          }
+          alert(pdfOpened
+            ? `Comprobante aceptado por SUNAT: ${resp.sunat.serie}-${resp.sunat.correlativo}`
+            : `SUNAT aceptó ${resp.sunat.serie}-${resp.sunat.correlativo}, pero no se pudo abrir el PDF. ${resp.sunat.pdf_error || 'Descárguelo desde el historial.'} No vuelva a emitir esta venta.`);
+        } else {
+          printWindow?.close();
+          alert(`La venta quedó registrada, pero SUNAT no confirmó la emisión. ${resp.sunat?.mensaje || 'Revise el estado en el historial antes de volver a emitir.'}`);
+        }
         // Limpiar formulario tras venta exitosa
         setAmount('0.00'); 
         setDni(''); 
@@ -126,13 +160,14 @@ const POS = () => {
         setIsCustomerFound(false);
         setPlate('');
         setErrorMessage('');
-        alert(`Venta procesada con éxito: ${resp.ticket_id}`);
       } else {
+        printWindow?.close();
         setErrorMessage(resp?.message || 'Error al emitir en el servidor');
       }
     } catch (err) {
+      printWindow?.close();
       console.error(err);
-      setErrorMessage('Error de conexión con el backend de facturación');
+      setErrorMessage(err.response?.data?.message || err.message || 'Error de conexión con el backend de facturación');
     } finally {
       setIsProcessing(false);
     }
@@ -146,7 +181,11 @@ const POS = () => {
     const companyName = company.razon_social || 'Empresa no identificada';
     const companyAddress = company.direccion || '';
     const companyRuc = company.ruc || '';
-    const sellerDocument = seller.nro_documento || seller.nombre_completo || 'No registrado';
+    const sellerName = (seller.nombre_completo || 'NO REGISTRADO').toUpperCase();
+    const sellerRole = seller.rol ? ` (${seller.rol.toUpperCase()})` : '';
+    const paymentLabel = paymentMethod.trim().toUpperCase() === 'EFECTIVO (SOLES)'
+      ? 'EFECTIVO'
+      : paymentMethod.trim().toUpperCase();
 
     const drawDottedLine = (y) => {
       doc.setLineDashPattern([0.8, 0.8], 0);
@@ -190,8 +229,12 @@ const POS = () => {
     doc.setFont("helvetica", "bold");
     doc.text(`FECHA: ${fechaHoraStr}`, 5, 52);
     doc.setFont("helvetica", "normal");
-    doc.text(`FORMA PAGO: ${paymentMethod.toUpperCase()}`, 5, 56);
-    doc.text(`VENDEDOR: ${sellerDocument.toUpperCase()}`, 5, 60);
+    doc.text(`FORMA PAGO: ${paymentLabel}`, 5, 56);
+    doc.text(
+      doc.splitTextToSize(`ATENDIDO POR: ${sellerName}${sellerRole}`, 70),
+      5,
+      60
+    );
 
     // Tabla de Ítems
     doc.setFont("helvetica", "bold");
@@ -229,7 +272,7 @@ const POS = () => {
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(7.5);
-    doc.text(`${paymentMethod.toUpperCase()} S/ ${numAmount.toFixed(2)}`, 5, 100);
+    doc.text(`${paymentLabel} S/ ${numAmount.toFixed(2)}`, 5, 100);
 
     drawDottedLine(103);
 
@@ -238,21 +281,10 @@ const POS = () => {
 
     drawDottedLine(111);
 
-    // Pie legal SUNAT
+    // Una nota de venta no es un comprobante electrónico.
     doc.setFont("helvetica", "normal");
     doc.setFontSize(6);
-    doc.text("Representación impresa del comprobante electrónico", 40, 115, { align: "center" });
-    doc.text("Comprobante registrado en el sistema", 40, 118.5, { align: "center" });
-
-    // Código QR
-    const qrData = `${companyRuc}|${docType === 'Factura Electrónica' ? '01' : '03'}|${ticketId}|0.00|${numAmount.toFixed(2)}|${fechaActual.toISOString().split('T')[0]}|${dni || '00000000'}|`;
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(qrData)}`;
-
-    try {
-      doc.addImage(qrUrl, "PNG", 28, 122, 24, 24);
-    } catch (error) {
-      console.warn('No se pudo agregar el código QR al comprobante.', error);
-    }
+    doc.text("NOTA DE VENTA INTERNA - NO ES COMPROBANTE SUNAT", 40, 115, { align: "center" });
 
     doc.setFontSize(6.5);
     doc.setFont("helvetica", "bold");

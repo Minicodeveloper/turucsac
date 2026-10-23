@@ -2,6 +2,12 @@ import React, { useEffect, useState, useMemo } from 'react';
 import Sidebar from '../../components/Sidebar';
 import api, { salesService } from '../../services/api';
 
+const sunatAceptoComprobante = (codigo) => {
+  if (codigo === null || codigo === undefined || codigo === '') return false;
+  const codigoNumerico = Number(codigo);
+  return Number.isInteger(codigoNumerico) && (codigoNumerico === 0 || codigoNumerico >= 4000);
+};
+
 const HistorialBoletas = () => {
   const [sales, setSales] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -11,8 +17,10 @@ const HistorialBoletas = () => {
   const [tipoFiltro, setTipoFiltro] = useState('TODOS');
 
   // Estado para modal de confirmación simple
-  const [saleToDelete, setSaleToDelete] = useState(null);
-  const [deleting, setDeleting] = useState(false);
+  const [saleToCancel, setSaleToCancel] = useState(null);
+  const [canceling, setCanceling] = useState(false);
+  const [cancellationReason, setCancellationReason] = useState('ANULACION DE LA OPERACION');
+  const [cancellationNotice, setCancellationNotice] = useState(null);
   const requestSales = () => salesService.getAll();
 
   const fetchSales = async () => {
@@ -89,8 +97,8 @@ const HistorialBoletas = () => {
       const response = await api.get(`/descargar_ticket.php?${param}&tipo=${tipo}`, {
         responseType: 'blob'
       });
-      const contentType = tipo === 'pdf' ? 'text/html' : response.data.type;
-      const file = new Blob([response.data], { type: contentType || 'application/octet-stream' });
+      const contentType = response.headers['content-type'] || response.data.type || 'application/octet-stream';
+      const file = new Blob([response.data], { type: contentType });
       const fileUrl = URL.createObjectURL(file);
 
       if (ticketWindow) {
@@ -111,26 +119,39 @@ const HistorialBoletas = () => {
     }
   };
 
-  // Función para eliminar la boleta seleccionada
-  const confirmarEliminarBoleta = async () => {
-    if (!saleToDelete) return;
-    setDeleting(true);
+  const confirmarAnulacionBoleta = async () => {
+    if (!saleToCancel || cancellationReason.trim() === '') return;
+    setCanceling(true);
     try {
-      const idBorrar = saleToDelete.id || saleToDelete.ticket_id;
-      const resp = await api.delete(`/sales.php?id=${idBorrar}`);
-      
-      if (resp && resp.data && resp.data.success) {
-        // Remover de la tabla de inmediato
-        setSales((prev) => prev.filter((s) => s.id !== saleToDelete.id));
-        setSaleToDelete(null);
+      const response = await api.post('/anular_comprobante.php', {
+        venta_id: saleToCancel.id,
+        motivo: cancellationReason.trim(),
+      });
+      setSaleToCancel(null);
+      if (response?.data?.success) {
+        setCancellationNotice({
+          type: 'success',
+          message: response.data.message || 'SUNAT aceptó la anulación.',
+        });
       } else {
-        alert(resp?.data?.message || 'No se pudo eliminar el comprobante.');
+        setCancellationNotice({
+          type: 'warning',
+          message: response?.data?.message || 'SUNAT no confirmó la anulación.',
+        });
       }
+      await fetchSales();
     } catch (err) {
-      console.error('Error al eliminar boleta:', err);
-      alert('Error en el servidor al intentar eliminar la boleta.');
+      console.error('Error al anular comprobante:', err);
+      setSaleToCancel(null);
+      const responseData = err.response?.data;
+      const message = responseData?.message
+        || (err.response?.status
+          ? `El servidor respondió con error (${err.response.status}). Verifique el estado de la anulación antes de volver a intentarlo.`
+          : 'No se pudo conectar con el servidor. Verifique el estado de la anulación antes de volver a intentarlo.');
+      setCancellationNotice({ type: 'warning', message });
+      await fetchSales();
     } finally {
-      setDeleting(false);
+      setCanceling(false);
     }
   };
 
@@ -161,6 +182,27 @@ const HistorialBoletas = () => {
             </button>
           </div>
         </header>
+
+        {cancellationNotice && (
+          <div
+            role="status"
+            className={`flex items-start justify-between gap-3 rounded border px-3 py-2 ${
+              cancellationNotice.type === 'success'
+                ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                : 'border-amber-300 bg-amber-50 text-amber-900'
+            }`}
+          >
+            <span>{cancellationNotice.message}</span>
+            <button
+              type="button"
+              onClick={() => setCancellationNotice(null)}
+              className="font-bold"
+              aria-label="Cerrar aviso"
+            >
+              ×
+            </button>
+          </div>
+        )}
 
         {/* Barra de Filtros y Búsqueda */}
         <div className="bg-white p-2.5 rounded border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-2">
@@ -277,12 +319,51 @@ const HistorialBoletas = () => {
 
                       {/* SUNAT */}
                       <td className="py-2 px-3 text-center">
-                        {sale.sunat_codigo ? (
+                        {sale.anulacion_estado === 'ANULADO' ? (
+                          <span
+                            title={sale.anulacion_mensaje || 'Nota de Crédito aceptada por SUNAT'}
+                            className="inline-block px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-red-100 text-red-800 border border-red-300"
+                          >
+                            ANULADO
+                          </span>
+                        ) : sale.anulacion_estado === 'ANULACION_PENDIENTE' ? (
+                          <span
+                            title={sale.anulacion_mensaje || 'Verifique el estado de la anulación en SUNAT'}
+                            className="inline-block px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-100 text-amber-800 border border-amber-300"
+                          >
+                            ANULACIÓN PENDIENTE
+                          </span>
+                        ) : sale.anulacion_estado === 'ANULACION_RECHAZADA' ? (
+                          <span
+                            title={sale.anulacion_mensaje || 'SUNAT rechazó la Nota de Crédito'}
+                            className="inline-block px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-red-100 text-red-800 border border-red-300"
+                          >
+                            ANULACIÓN RECHAZADA
+                          </span>
+                        ) : sale.tipo_comprobante === 'Nota de Venta' ? (
+                          <span className="inline-block px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-100 text-slate-600 border border-slate-300">
+                            NO ELECTRÓNICA
+                          </span>
+                        ) : sunatAceptoComprobante(sale.sunat_codigo) ? (
                           <span
                             title={sale.sunat_mensaje || 'Comprobante procesado'}
                             className="inline-block px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-100 text-emerald-800 border border-emerald-300"
                           >
                             {sale.sunat_codigo} ACEPTADO
+                          </span>
+                        ) : sale.sunat_codigo ? (
+                          <span
+                            title={sale.sunat_mensaje || 'SUNAT rechazó el comprobante'}
+                            className="inline-block px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-red-100 text-red-800 border border-red-300"
+                          >
+                            {sale.sunat_codigo} RECHAZADO
+                          </span>
+                        ) : sale.sunat_mensaje ? (
+                          <span
+                            title={sale.sunat_mensaje}
+                            className="inline-block px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-orange-100 text-orange-800 border border-orange-300"
+                          >
+                            REVISAR
                           </span>
                         ) : (
                           <span className="inline-block px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-100 text-amber-800 border border-amber-300">
@@ -297,7 +378,8 @@ const HistorialBoletas = () => {
                           <button
                             type="button"
                             onClick={() => handleDownloadFile(sale, 'pdf')}
-                            className="px-2 py-0.5 bg-[#24a0ed] hover:bg-sky-600 text-white rounded font-mono font-bold text-[10px] transition-colors flex items-center gap-0.5 shadow-xs cursor-pointer"
+                            disabled={sale.tipo_comprobante !== 'Nota de Venta' && !sunatAceptoComprobante(sale.sunat_codigo)}
+                            className="px-2 py-0.5 bg-[#24a0ed] hover:bg-sky-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded font-mono font-bold text-[10px] transition-colors flex items-center gap-0.5 shadow-xs cursor-pointer"
                             title="Descargar comprobante en PDF"
                           >
                             <span className="material-symbols-outlined text-[11px]">download</span>
@@ -307,7 +389,8 @@ const HistorialBoletas = () => {
                           <button
                             type="button"
                             onClick={() => handleDownloadFile(sale, 'xml')}
-                            className="px-2 py-0.5 bg-slate-700 hover:bg-slate-800 text-white rounded font-mono font-bold text-[10px] transition-colors flex items-center gap-0.5 shadow-xs cursor-pointer"
+                            disabled={!sunatAceptoComprobante(sale.sunat_codigo) || !sale.sunat_xml_path}
+                            className="px-2 py-0.5 bg-slate-700 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded font-mono font-bold text-[10px] transition-colors flex items-center gap-0.5 shadow-xs cursor-pointer"
                             title="Descargar XML firmado SUNAT"
                           >
                             <span className="material-symbols-outlined text-[11px]">code</span>
@@ -317,7 +400,8 @@ const HistorialBoletas = () => {
                           <button
                             type="button"
                             onClick={() => handleDownloadFile(sale, 'cdr')}
-                            className="px-2 py-0.5 bg-slate-500 hover:bg-slate-600 text-white rounded font-mono font-bold text-[10px] transition-colors flex items-center gap-0.5 shadow-xs cursor-pointer"
+                            disabled={!sunatAceptoComprobante(sale.sunat_codigo) || !sale.sunat_cdr_path}
+                            className="px-2 py-0.5 bg-slate-500 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded font-mono font-bold text-[10px] transition-colors flex items-center gap-0.5 shadow-xs cursor-pointer"
                             title="Descargar Constancia de Recepción SUNAT (CDR)"
                           >
                             <span className="material-symbols-outlined text-[11px]">inventory_2</span>
@@ -330,9 +414,16 @@ const HistorialBoletas = () => {
                       <td className="py-2 px-3 text-center">
                         <button
                           type="button"
-                          onClick={() => setSaleToDelete(sale)}
-                          className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                          title="Eliminar este comprobante"
+                          onClick={() => {
+                            setCancellationReason('ANULACION DE LA OPERACION');
+                            setCancellationNotice(null);
+                            setSaleToCancel(sale);
+                          }}
+                          disabled={sale.tipo_comprobante === 'Nota de Venta'
+                            || !sunatAceptoComprobante(sale.sunat_codigo)
+                            || Boolean(sale.anulacion_estado)}
+                          className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                          title="Anular ante SUNAT mediante Nota de Crédito"
                         >
                           <span className="material-symbols-outlined text-[16px]">delete</span>
                         </button>
@@ -346,18 +437,20 @@ const HistorialBoletas = () => {
         </div>
       </main>
 
-      {/* Modal de confirmación para eliminar la boleta */}
-      {saleToDelete && (
+      {saleToCancel && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded border border-slate-200 shadow-xl max-w-sm w-full overflow-hidden animate-in fade-in zoom-in-95 duration-100">
             <div className="bg-rose-600 text-white px-4 py-2.5 flex items-center justify-between">
               <span className="font-bold text-xs uppercase tracking-wide flex items-center gap-1.5">
                 <span className="material-symbols-outlined text-base">warning</span>
-                Eliminar Comprobante
+                Anular ante SUNAT
               </span>
               <button
                 type="button"
-                onClick={() => setSaleToDelete(null)}
+                onClick={() => {
+                  if (!canceling) setSaleToCancel(null);
+                }}
+                disabled={canceling}
                 className="text-white hover:text-rose-200"
               >
                 ✕
@@ -366,34 +459,46 @@ const HistorialBoletas = () => {
 
             <div className="p-4 flex flex-col gap-3">
               <p className="text-slate-700 text-xs leading-relaxed">
-                ¿Estás seguro de que deseas eliminar la boleta{' '}
+                Esta acción emitirá una Nota de Crédito por anulación de la operación para el comprobante{' '}
                 <b className="font-mono text-slate-900">
-                  {saleToDelete.serie || 'B001'}-{saleToDelete.correlativo || saleToDelete.id}
-                </b>{' '}
-                ({saleToDelete.ticket_id}) por el monto de{' '}
-                <b className="text-slate-900">S/ {formatPEN(saleToDelete.monto_total)}</b>?
+                  {saleToCancel.serie || 'B001'}-{saleToCancel.correlativo || saleToCancel.id}
+                </b>. La operación es irreversible si SUNAT la acepta. El registro original se conservará en el historial.
               </p>
+
+              <label className="flex flex-col gap-1 text-xs font-bold text-slate-700">
+                Motivo de anulación
+                <input
+                  type="text"
+                  value={cancellationReason}
+                  onChange={(event) => setCancellationReason(event.target.value)}
+                  disabled={canceling}
+                  maxLength={250}
+                  className="w-full rounded border border-slate-300 px-2 py-1.5 font-normal"
+                  required
+                />
+              </label>
 
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setSaleToDelete(null)}
+                  onClick={() => setSaleToCancel(null)}
+                  disabled={canceling}
                   className="px-3 py-1.5 rounded border border-slate-300 font-bold text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer text-xs"
                 >
-                  Cancelar
+                  Volver
                 </button>
                 <button
                   type="button"
-                  onClick={confirmarEliminarBoleta}
-                  disabled={deleting}
+                  onClick={confirmarAnulacionBoleta}
+                  disabled={canceling || cancellationReason.trim() === ''}
                   className="px-3 py-1.5 rounded bg-rose-600 hover:bg-rose-700 text-white font-bold transition-colors cursor-pointer text-xs flex items-center gap-1"
                 >
-                  {deleting ? (
+                  {canceling ? (
                     <span className="material-symbols-outlined animate-spin text-[14px]">sync</span>
                   ) : (
-                    <span className="material-symbols-outlined text-[14px]">delete</span>
+                    <span className="material-symbols-outlined text-[14px]">block</span>
                   )}
-                  Eliminar
+                  Enviar Nota de Crédito
                 </button>
               </div>
             </div>

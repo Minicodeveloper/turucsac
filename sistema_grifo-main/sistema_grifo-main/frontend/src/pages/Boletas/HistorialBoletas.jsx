@@ -119,6 +119,50 @@ const HistorialBoletas = () => {
     }
   };
 
+  const handleDownloadCancellationFile = async (sale, tipo) => {
+    const noteNumber = Number(sale.anulacion_correlativo);
+    if (sale.anulacion_estado !== 'ANULADO'
+      || !sale.id
+      || !/^[A-Z0-9]{4}$/.test(sale.anulacion_serie || '')
+      || !Number.isInteger(noteNumber)
+      || noteNumber < 1) {
+      alert('No hay un archivo de anulación confirmado disponible.');
+      return;
+    }
+
+    const fileWindow = tipo === 'xml' ? window.open('about:blank', '_blank') : null;
+    if (tipo === 'xml' && !fileWindow) {
+      alert('Permite las ventanas emergentes para ver el XML de anulación.');
+      return;
+    }
+
+    try {
+      const response = await api.get(
+        `/ver_archivo_anulacion.php?id=${encodeURIComponent(sale.id)}&tipo=${tipo}`,
+        { responseType: 'blob' }
+      );
+      const contentType = response.headers['content-type'] || response.data.type || 'application/octet-stream';
+      const file = new Blob([response.data], { type: contentType });
+      const fileUrl = URL.createObjectURL(file);
+
+      if (fileWindow) {
+        fileWindow.location.href = fileUrl;
+      } else {
+        const link = document.createElement('a');
+        link.href = fileUrl;
+        link.download = `R-${sale.anulacion_serie}-${noteNumber}.zip`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+      window.setTimeout(() => URL.revokeObjectURL(fileUrl), 60_000);
+    } catch (err) {
+      fileWindow?.close();
+      console.error('Error al descargar archivo de anulación:', err);
+      alert('No se pudo obtener el archivo de anulación.');
+    }
+  };
+
   const confirmarAnulacionBoleta = async () => {
     if (!saleToCancel || cancellationReason.trim() === '') return;
     setCanceling(true);
@@ -407,6 +451,29 @@ const HistorialBoletas = () => {
                             <span className="material-symbols-outlined text-[11px]">inventory_2</span>
                             CDR
                           </button>
+
+                          {sale.anulacion_estado === 'ANULADO' && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadCancellationFile(sale, 'xml')}
+                                className="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white rounded font-mono font-bold text-[10px] transition-colors flex items-center gap-0.5 shadow-xs cursor-pointer"
+                                title={`Ver XML de la Nota de Crédito ${sale.anulacion_serie}-${sale.anulacion_correlativo}`}
+                              >
+                                <span className="material-symbols-outlined text-[11px]">description</span>
+                                NC XML
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadCancellationFile(sale, 'cdr')}
+                                className="px-2 py-0.5 bg-purple-600 hover:bg-purple-700 text-white rounded font-mono font-bold text-[10px] transition-colors flex items-center gap-0.5 shadow-xs cursor-pointer"
+                                title={`Descargar CDR de la Nota de Crédito ${sale.anulacion_serie}-${sale.anulacion_correlativo}`}
+                              >
+                                <span className="material-symbols-outlined text-[11px]">inventory_2</span>
+                                NC CDR
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
 

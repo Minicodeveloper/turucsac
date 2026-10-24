@@ -14,19 +14,23 @@ try {
     // 1. Total Ventas Hoy / Turno
     $ventas_hoy = 0.0;
     try {
-        $qHoy = "SELECT COALESCE(SUM(monto_total), 0) as total FROM ventas WHERE DATE(fecha_venta) = CURDATE()";
+        $qHoy = "SELECT COALESCE(SUM(monto_total), 0) as total FROM ventas
+                 WHERE DATE(fecha_venta) = CURDATE()
+                   AND (anulacion_estado IS NULL OR anulacion_estado <> 'ANULADO')";
         $stmtHoy = $db->query($qHoy);
         $ventas_hoy = (float)($stmtHoy->fetch(PDO::FETCH_ASSOC)['total'] ?? 0);
 
         // Si no hay ventas registradas estrictamente con fecha de hoy, toma el total general acumulado
         if ($ventas_hoy == 0) {
-            $qAcum = "SELECT COALESCE(SUM(monto_total), 0) as total FROM ventas";
+            $qAcum = "SELECT COALESCE(SUM(monto_total), 0) as total FROM ventas
+                      WHERE (anulacion_estado IS NULL OR anulacion_estado <> 'ANULADO')";
             $stmtAcum = $db->query($qAcum);
             $ventas_hoy = (float)($stmtAcum->fetch(PDO::FETCH_ASSOC)['total'] ?? 0);
         }
     } catch (Exception $e) {
         try {
-            $qAcum = "SELECT COALESCE(SUM(total), 0) as total FROM ventas";
+            $qAcum = "SELECT COALESCE(SUM(total), 0) as total FROM ventas
+                      WHERE (anulacion_estado IS NULL OR anulacion_estado <> 'ANULADO')";
             $stmtAcum = $db->query($qAcum);
             $ventas_hoy = (float)($stmtAcum->fetch(PDO::FETCH_ASSOC)['total'] ?? 0);
         } catch (Exception $e2) {
@@ -37,7 +41,8 @@ try {
     // 2. Total de Transacciones (Comprobantes emitidos)
     $total_ventas_mes = 0;
     try {
-        $qTrans = "SELECT COUNT(*) as total FROM ventas";
+        $qTrans = "SELECT COUNT(*) as total FROM ventas
+                   WHERE (anulacion_estado IS NULL OR anulacion_estado <> 'ANULADO')";
         $stmtTrans = $db->query($qTrans);
         $total_ventas_mes = (int)($stmtTrans->fetch(PDO::FETCH_ASSOC)['total'] ?? 0);
     } catch (Exception $e) {
@@ -67,7 +72,8 @@ try {
     try {
         $qSemana = "SELECT DAYOFWEEK(fecha_venta) as dia_num, COALESCE(SUM(monto_total), 0) as total 
                     FROM ventas 
-                    WHERE fecha_venta >= DATE_SUB(CURDATE(), INTERVAL 7 DAY) 
+                    WHERE fecha_venta >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+                      AND (anulacion_estado IS NULL OR anulacion_estado <> 'ANULADO')
                     GROUP BY DAYOFWEEK(fecha_venta)";
         $stmtSemana = $db->query($qSemana);
         $rows = $stmtSemana->fetchAll(PDO::FETCH_ASSOC);

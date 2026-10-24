@@ -19,12 +19,14 @@ $metodos = [];
 try {
     // 1. Ingresos Totales (Ventas) - Detecta si la columna es monto_total o total o monto
     try {
-        $qIngresos = "SELECT COALESCE(SUM(monto_total), 0) as total FROM ventas";
+        $qIngresos = "SELECT COALESCE(SUM(monto_total), 0) as total FROM ventas
+                      WHERE (anulacion_estado IS NULL OR anulacion_estado <> 'ANULADO')";
         $stmtIng = $db->query($qIngresos);
         $ingresos = (float)($stmtIng->fetch(PDO::FETCH_ASSOC)['total'] ?? 0);
     } catch (Exception $e) {
         try {
-            $qIngresos = "SELECT COALESCE(SUM(total), 0) as total FROM ventas";
+            $qIngresos = "SELECT COALESCE(SUM(total), 0) as total FROM ventas
+                          WHERE (anulacion_estado IS NULL OR anulacion_estado <> 'ANULADO')";
             $stmtIng = $db->query($qIngresos);
             $ingresos = (float)($stmtIng->fetch(PDO::FETCH_ASSOC)['total'] ?? 0);
         } catch (Exception $e2) {
@@ -61,12 +63,16 @@ try {
 
     // 4. Desglose por Método de Pago
     try {
-        $qMetodo = "SELECT metodo_pago as label, COALESCE(SUM(monto_total), 0) as value FROM ventas GROUP BY metodo_pago";
+        $qMetodo = "SELECT metodo_pago as label, COALESCE(SUM(monto_total), 0) as value FROM ventas
+                    WHERE (anulacion_estado IS NULL OR anulacion_estado <> 'ANULADO')
+                    GROUP BY metodo_pago";
         $stmtMet = $db->query($qMetodo);
         $metodos = $stmtMet->fetchAll(PDO::FETCH_ASSOC);
     } catch (Exception $e) {
         try {
-            $qMetodo = "SELECT metodo_pago as label, COALESCE(SUM(total), 0) as value FROM ventas GROUP BY metodo_pago";
+            $qMetodo = "SELECT metodo_pago as label, COALESCE(SUM(total), 0) as value FROM ventas
+                        WHERE (anulacion_estado IS NULL OR anulacion_estado <> 'ANULADO')
+                        GROUP BY metodo_pago";
             $stmtMet = $db->query($qMetodo);
             $metodos = $stmtMet->fetchAll(PDO::FETCH_ASSOC);
         } catch (Exception $e2) {

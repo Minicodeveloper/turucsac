@@ -23,6 +23,16 @@ Bienvenido al sistema de gestión operativa para estaciones de servicio (grifos)
 5. **Dashboard y Punto de Venta (POS) en Tiempo Real**:
    - Gráficas interactivas de ventas, alertas de stock crítico, kardex avanzado y generación de tickets y comprobantes profesionales.
 
+## 👤 Credenciales por Defecto (Roles del Sistema)
+
+| Rol Oficial | Documento (Usuario) | Contraseña | Alcance / Módulo Inicial |
+| :--- | :--- | :--- | :--- |
+| **Super Administrador** | `77665544` | `12345` | Control global de la plataforma y empresas |
+| **Administrador de Empresa**| `45678910` | `123456` | Gestión de su empresa y certificado `.p12` |
+| **Supervisor** | `23456789` | `123456` | Control de turnos, arqueos y auditoría |
+| **Cajero / Bombero** | `34567891` | `123456` | Punto de Venta (POS) y emisión de boletas |
+
+
 ## 🛠️ Instalación y Configuración
 
 ### 1. Requisitos

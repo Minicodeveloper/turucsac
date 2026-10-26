@@ -8,11 +8,20 @@ Bienvenido al sistema de gestión operativa para estaciones de servicio (grifos)
 - **Base de Datos**: MySQL (XAMPP).
 
 ## 💎 Características Principales
-1.  **Dashboard en Tiempo Real**: Gráficas interactivas de ventas y alertas de stock crítico.
-2.  **Punto de Venta (POS)**: Interfaz rápida con búsqueda automática de clientes y generación de tickets PDF profesionales.
-3.  **Kardex Avanzado**: Auditoría completa de cada gota de combustible que entra o sale del sistema.
-4.  **Gestión de Clientes**: Base de datos centralizada para Personas y Empresas (DNI/RUC).
-5.  **Seguridad P2**: 100% de consultas protegidas contra SQL Injection y autenticación persistente.
+
+1. **Arquitectura Multi-Empresa (Multi-Tenant)**: 
+   - Aislamiento estricto de datos. Cada empresa cliente administra exclusivamente su propia información (ventas, inventario, clientes y reportes) sin cruzar datos con otras organizaciones.
+2. **Jerarquía de 4 Roles y Accesos (RBAC)**:
+   - **Super Administrador**: Dueño global de la plataforma ERP encargado de crear empresas, administrar suscripciones y accesos.
+   - **Administrador de Empresa**: Dueño del negocio particular; gestiona su configuración, sube su certificado digital y crea supervisores y cajeros.
+   - **Supervisor**: Controla turnos, arqueos de caja, auditorías y supervisión operativa.
+   - **Cajero / Bombero**: Operador en pista o counter enfocado exclusivamente en ventas rápidas en el POS y registro de asistencias.
+3. **Gestión Dinámica de Certificados Digitales (`.p12`)**:
+   - Cada empresa sube su propio archivo de certificado y clave privada directamente desde el panel de **Configuración**. Los comprobantes se firman dinámicamente con la identidad fiscal activa en sesión.
+4. **Módulo de Anulación y Notas de Crédito**:
+   - Anulación formal e irreversible de comprobantes aceptados mediante Notas de Crédito Electrónicas (Motivo 01 - Anulación de la operación), asegurando el registro en los servidores de la SUNAT y la obtención de los archivos CDR oficiales.
+5. **Dashboard y Punto de Venta (POS) en Tiempo Real**:
+   - Gráficas interactivas de ventas, alertas de stock crítico, kardex avanzado y generación de tickets y comprobantes profesionales.
 
 ## 🛠️ Instalación y Configuración
 
@@ -40,3 +49,5 @@ Bienvenido al sistema de gestión operativa para estaciones de servicio (grifos)
 
 ---
 *Desarrollado con ❤️ para TURUCSAC ERP.*
+
+

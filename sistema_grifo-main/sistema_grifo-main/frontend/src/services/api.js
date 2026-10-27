@@ -50,6 +50,12 @@ export const financeService = {
   addExpense: (data) => api.post('/gastos.php', data).then(res => res.data),
 };
 
+export const cashClosingService = {
+  getSummary: () => api.get('/cierres_caja.php?action=summary').then(res => res.data),
+  getHistory: () => api.get('/cierres_caja.php').then(res => res.data),
+  create: (data) => api.post('/cierres_caja.php', data).then(res => res.data),
+};
+
 export const conciliacionService = {
   getHistory: () => api.get('/conciliacion.php').then(res => res.data),
   processClosing: (data) => api.post('/conciliacion.php', data).then(res => res.data),
@@ -65,6 +71,7 @@ export const salesService = {
 
 export const customerService = {
   getAll: () => api.get('/customers.php').then(res => res.data),
+  getCompanies: () => api.get('/customers.php?companies=1').then(res => res.data),
   searchByDoc: (doc) => api.get(`/customers.php?documento=${doc}`).then(res => res.data),
   searchQuery: (query) => api.get(`/customers.php?search=${query}`).then(res => res.data),
   create: (data) => api.post('/customers.php', data).then(res => res.data),

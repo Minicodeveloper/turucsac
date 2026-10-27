@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from '../../components/Sidebar';
 import { financeService } from '../../services/api';
@@ -35,24 +35,26 @@ const Finanzas = () => {
   const [fechaDesde, setFechaDesde] = useState('2026-09-01');
   const [fechaHasta, setFechaHasta] = useState(todayStr);
 
-  useEffect(() => {
-    fetchStats();
+  const fetchStats = useCallback(async () => {
+    const resp = await financeService.getStats();
+    return resp ? (resp.data ? resp.data : resp) : null;
   }, []);
 
-  const fetchStats = async () => {
-    setLoading(true);
-    try {
-      const resp = await financeService.getStats();
-      if (resp) {
-        const payload = resp.data ? resp.data : resp;
-        setStats(payload);
-      }
-    } catch (err) {
-      console.error('Error al cargar finanzas:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    let active = true;
+    fetchStats()
+      .then((payload) => {
+        if (active && payload) setStats(payload);
+      })
+      .catch((err) => {
+        console.error('Error al cargar finanzas:', err);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => { active = false; };
+  }, [fetchStats]);
 
   const formatPEN = (val) => {
     const num = Number(val) || 0;
@@ -117,7 +119,7 @@ const Finanzas = () => {
 
   const handleTabClick = (tabId) => {
     if (tabId === 'flujo') {
-      navigate('/conciliacion');
+      navigate('/cierres-caja');
     } else {
       setActiveTab(tabId);
     }

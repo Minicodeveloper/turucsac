@@ -1,30 +1,30 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { ADMIN_ROLES, ALL_ROLES, SUPERVISOR_ROLES, getUserRole, hasRole } from '../utils/roles';
 
 const SidebarGym = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
   const user = JSON.parse(sessionStorage.getItem('usuario') || '{}');
-  const userRole = user.rol || 'cajero';
+  const userRole = getUserRole(user);
 
   const allItems = [
-    { name: 'Panel de Control', icon: 'space_dashboard', path: '/gimnasio' },
-    { name: 'Socios', icon: 'how_to_reg', path: '/gimnasio/socios' },
-    { name: 'Planes', icon: 'workspace_premium', path: '/gimnasio/planes' },
-    { name: 'Asistencias', icon: 'event_available', path: '/gimnasio/asistencias' },
-    { name: 'Instructores', icon: 'sports', path: '/gimnasio/instructores' },
-    { name: 'Ingresos', icon: 'payments', path: '/gimnasio/ingresos' },
-
+    { name: 'Panel de Control', icon: 'space_dashboard', path: '/gimnasio', roles: ALL_ROLES },
+    { name: 'Socios', icon: 'how_to_reg', path: '/gimnasio/socios', roles: ALL_ROLES },
+    { name: 'Planes', icon: 'workspace_premium', path: '/gimnasio/planes', roles: ADMIN_ROLES },
+    { name: 'Asistencias', icon: 'event_available', path: '/gimnasio/asistencias', roles: ALL_ROLES },
+    { name: 'Instructores', icon: 'sports', path: '/gimnasio/instructores', roles: SUPERVISOR_ROLES },
+    { name: 'Ingresos', icon: 'payments', path: '/gimnasio/ingresos', roles: SUPERVISOR_ROLES },
+    { name: 'Configuración', icon: 'settings', path: '/gimnasio/configuracion', roles: ADMIN_ROLES },
+    { name: 'Cierres de Caja', icon: 'point_of_sale', path: '/cierres-caja', roles: ALL_ROLES },
   ];
 
-
-  
-
   const isOnMainPanel = location.pathname === '/gimnasio';
+  const allowedItems = allItems.filter((item) => hasRole(userRole, item.roles));
   const menuItems = isOnMainPanel
-    ? [{ name: 'Panel de Control', icon: 'space_dashboard', path: '/gimnasio' }]
-    : allItems;
+    ? allowedItems.filter((item) => item.path === '/gimnasio')
+    : allowedItems;
 
   return (
     <aside className="hidden md:flex flex-col pt-20 pb-8 h-screen w-64 glass fixed left-0 top-0 z-40 shadow-[16px_0_32px_rgba(11,29,45,0.04)]">

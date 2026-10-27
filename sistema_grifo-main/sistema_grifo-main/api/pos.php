@@ -15,10 +15,15 @@ $action = $_GET['action'] ?? '';
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     if ($action === 'prices') {
         try {
+            if (!USER_EMPRESA_ID) {
+                http_response_code(403);
+                echo json_encode(["success" => false, "message" => "Selecciona una empresa para consultar su inventario."]);
+                exit;
+            }
             // Extraer Combustibles y sus Precios desde la Base de Datos
-            $query = "SELECT id, nombre_producto, precio_por_galon FROM combustibles WHERE estado = 1";
+            $query = "SELECT id, nombre_producto, precio_por_galon FROM combustibles WHERE estado = 1 AND empresa_id = :empresa_id";
             $stmt = $db->prepare($query);
-            $stmt->execute();
+            $stmt->execute([':empresa_id' => USER_EMPRESA_ID]);
             
             $precios = [];
             while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
@@ -32,7 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                 "data" => $precios,
                 "message" => "Precios cargados desde MySQL"
             ]);
-        } catch (PDOException $e) {
+        } catch (Throwable $e) {
              http_response_code(500);
              echo json_encode(["success" => false, "message" => "Error al obtener los precios de combustible."]);
         }
@@ -59,6 +64,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         $metodo_pago = trim((string) ($saleData['metodo_pago'] ?? $saleData['forma_pago'] ?? 'Efectivo'));
         if ($metodo_pago === '') {
             $metodo_pago = 'Efectivo';
+        }
+        if (!in_array($metodo_pago, ['Efectivo', 'Efectivo (Soles)', 'Tarjeta'], true)) {
+            http_response_code(422);
+            echo json_encode(["success" => false, "message" => "El método de pago no está permitido."]);
+            exit;
         }
         $tipo_comprobante = $saleData['tipo_comprobante'] ?? 'Boleta';
 
@@ -88,8 +98,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                     exit;
                 }
 
-                $sellerStmt = $db->prepare("SELECT id, nro_documento, nombre_completo, rol FROM usuarios WHERE id = :id LIMIT 1");
-                $sellerStmt->execute([':id' => USER_ID]);
+                $sellerStmt = $db->prepare("SELECT id, nro_documento, nombre_completo, rol FROM usuarios WHERE id = :id AND empresa_id = :empresa_id LIMIT 1");
+                $sellerStmt->execute([':id' => USER_ID, ':empresa_id' => $empresaId]);
                 $seller = $sellerStmt->fetch(PDO::FETCH_ASSOC);
                 if (!$seller) {
                     http_response_code(401);
@@ -98,10 +108,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                 }
 
                 // 1. Obtener el ID del Combustible basándonos en su nombre
-                $queryComb = "SELECT id FROM combustibles WHERE nombre_producto = :nombre LIMIT 1";
+                $queryComb = "SELECT id FROM combustibles WHERE nombre_producto = :nombre AND empresa_id = :empresa_id LIMIT 1";
                 $stmtComb = $db->prepare($queryComb);
-                $stmtComb->bindParam(':nombre', $combustible_nombre);
-                $stmtComb->execute();
+                $stmtComb->execute([':nombre' => $combustible_nombre, ':empresa_id' => $empresaId]);
                 
                 if($row = $stmtComb->fetch(PDO::FETCH_ASSOC)) {
                     $combustible_id = $row['id'];
@@ -110,14 +119,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                     $db->beginTransaction();
                     
                     // 2. Insertar o buscar cliente
-                    $cId = 1;
+                    $cId = null;
                     if($cliente_dni !== '00000000' && !empty($cliente_dni)){
                         $cleanDni = preg_replace('/[^0-9]/', '', $cliente_dni);
-                        $stmtCheck = $db->prepare("INSERT IGNORE INTO clientes (documento, razon_social, direccion) VALUES (:dni, 'N/A', '')");
-                        $stmtCheck->execute([':dni' => $cleanDni]);
+                        $stmtCheck = $db->prepare("INSERT IGNORE INTO clientes (empresa_id, documento, razon_social, direccion) VALUES (:empresa_id, :dni, 'N/A', '')");
+                        $stmtCheck->execute([':empresa_id' => $empresaId, ':dni' => $cleanDni]);
                         
-                        $stmtC = $db->prepare("SELECT id FROM clientes WHERE documento = :dni LIMIT 1");
-                        $stmtC->execute([':dni' => $cleanDni]);
+                        $stmtC = $db->prepare("SELECT id FROM clientes WHERE documento = :dni AND empresa_id = :empresa_id LIMIT 1");
+                        $stmtC->execute([':dni' => $cleanDni, ':empresa_id' => $empresaId]);
                         if($rowC = $stmtC->fetch(PDO::FETCH_ASSOC)){
                             $cId = $rowC['id'];
                         }
@@ -148,26 +157,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                         $ventaId = (int) $db->lastInsertId();
 
                         // 3. Obtener stock actual antes de deducir
-                        $stmtS = $db->prepare("SELECT stock_galones FROM combustibles WHERE id = :cid FOR UPDATE");
-                        $stmtS->execute([':cid' => $combustible_id]);
-                        $stock_anterior = (float)$stmtS->fetch(PDO::FETCH_ASSOC)['stock_galones'];
+                        $stmtS = $db->prepare("SELECT stock_galones FROM combustibles WHERE id = :cid AND empresa_id = :empresa_id FOR UPDATE");
+                        $stmtS->execute([':cid' => $combustible_id, ':empresa_id' => $empresaId]);
+                        $stockRow = $stmtS->fetch(PDO::FETCH_ASSOC);
+                        if (!$stockRow) {
+                            throw new RuntimeException('El combustible ya no pertenece a la empresa activa.');
+                        }
+                        $stock_anterior = (float)$stockRow['stock_galones'];
                         $stock_actual = $stock_anterior - (float)$galones;
 
                         // 4. Deducir stock del inventario
-                        $updateStock = "UPDATE combustibles SET stock_galones = :new_stock WHERE id = :cid";
+                        $updateStock = "UPDATE combustibles SET stock_galones = :new_stock WHERE id = :cid AND empresa_id = :empresa_id";
                         $stmtUpdate = $db->prepare($updateStock);
                         $stmtUpdate->bindParam(':new_stock', $stock_actual);
                         $stmtUpdate->bindParam(':cid', $combustible_id);
+                        $stmtUpdate->bindParam(':empresa_id', $empresaId);
                         $stmtUpdate->execute();
 
                         // 5. Registrar movimiento en Kardex
-                        $insertKardex = "INSERT INTO movimientos_kardex (combustible_id, tipo_movimiento, cantidad, stock_anterior, stock_actual, descripcion, usuario_id) 
-                                         VALUES (:cid, 'SALIDA', :cant, :ant, :act, :desc, :uid)";
+                        $insertKardex = "INSERT INTO movimientos_kardex (empresa_id, combustible_id, tipo_movimiento, cantidad, stock_anterior, stock_actual, descripcion, usuario_id) 
+                                         VALUES (:empresa_id, :cid, 'SALIDA', :cant, :ant, :act, :desc, :uid)";
                         $stmtKardex = $db->prepare($insertKardex);
                         $descKardex = "Venta Ticket: $ticket_id";
                         $uid = defined('USER_ID') ? USER_ID : null; // Asumiendo que USER_ID viene del middleware
 
                         $stmtKardex->execute([
+                            ':empresa_id' => $empresaId,
                             ':cid' => $combustible_id,
                             ':cant' => $galones,
                             ':ant' => $stock_anterior,

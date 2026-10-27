@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Sidebar from '../../components/Sidebar';
 import api, { posService, customerService } from '../../services/api';
 import { jsPDF } from 'jspdf';
@@ -20,6 +20,11 @@ const POS = () => {
   const [dni, setDni] = useState('');
   const [customerName, setCustomerName] = useState('CLIENTES VARIOS');
   const [isCustomerFound, setIsCustomerFound] = useState(false);
+  const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
+  const [newCustomerName, setNewCustomerName] = useState('');
+  const [isSavingCustomer, setIsSavingCustomer] = useState(false);
+  const [customerFormError, setCustomerFormError] = useState('');
+  const customerSearchSequence = useRef(0);
   const [plate, setPlate] = useState('');
   const [docType, setDocType] = useState('Boleta de Venta');
   const [paymentMethod, setPaymentMethod] = useState('Efectivo (Soles)');
@@ -43,9 +48,10 @@ const POS = () => {
     if (docClean.length !== 8 && docClean.length !== 11) return undefined;
 
     let mounted = true;
+    const requestSequence = ++customerSearchSequence.current;
     customerService.searchByDoc(docClean)
       .then(resp => {
-        if (!mounted) return;
+        if (!mounted || requestSequence !== customerSearchSequence.current) return;
         if (resp?.success && resp.data) {
           setCustomerName(resp.data.razon_social || resp.data.nombre);
           setIsCustomerFound(true);
@@ -56,7 +62,7 @@ const POS = () => {
         }
       })
       .catch(() => {
-        if (mounted) {
+        if (mounted && requestSequence === customerSearchSequence.current) {
           setCustomerName('CLIENTES VARIOS');
           setIsCustomerFound(false);
         }
@@ -72,6 +78,44 @@ const POS = () => {
       setCustomerName('CLIENTES VARIOS');
     } else if (docClean.length !== 8 && docClean.length !== 11) {
       setCustomerName('CLIENTE LIBRE');
+    }
+  };
+
+  const openCustomerForm = () => {
+    setNewCustomerName('');
+    setCustomerFormError('');
+    setIsCustomerModalOpen(true);
+  };
+
+  const handleCreateCustomer = async (event) => {
+    event.preventDefault();
+    const document = dni.trim();
+    const name = newCustomerName.trim();
+    if (!/^(\d{8}|\d{11})$/.test(document) || !name) {
+      setCustomerFormError('Ingresa un DNI o RUC válido y el nombre o razón social.');
+      return;
+    }
+
+    setIsSavingCustomer(true);
+    setCustomerFormError('');
+    try {
+      const response = await customerService.create({
+        documento: document,
+        razon_social: name,
+        tipo_cliente: document.length === 11 ? 'EMPRESA' : 'PERSONA',
+      });
+      if (!response?.success) {
+        throw new Error(response?.message || 'No se pudo registrar el cliente.');
+      }
+
+      setCustomerName(name);
+      setIsCustomerFound(true);
+      customerSearchSequence.current += 1;
+      setIsCustomerModalOpen(false);
+    } catch (error) {
+      setCustomerFormError(error.response?.data?.message || error.message || 'No se pudo registrar el cliente.');
+    } finally {
+      setIsSavingCustomer(false);
     }
   };
 
@@ -399,6 +443,15 @@ const POS = () => {
                     <span className="text-sky-600 font-extrabold uppercase">• Cliente Libre</span>
                   ) : null}
                 </div>
+                {/^(\d{8}|\d{11})$/.test(dni.trim()) && !isCustomerFound && (
+                  <button
+                    type="button"
+                    onClick={openCustomerForm}
+                    className="mt-1 self-start text-[10px] font-black uppercase tracking-wide text-[#168bd0] hover:text-sky-800"
+                  >
+                    + Registrar cliente para emitir
+                  </button>
+                )}
               </div>
 
               {/* Placa Obligatoria */}
@@ -506,6 +559,49 @@ const POS = () => {
           </div>
         </div>
       </main>
+
+      {isCustomerModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-4" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setIsCustomerModalOpen(false);
+        }}>
+          <form
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pos-customer-title"
+            onSubmit={handleCreateCustomer}
+            className="w-full max-w-md space-y-4 rounded-2xl bg-white p-6 shadow-2xl"
+          >
+            <header>
+              <p className="text-[10px] font-black uppercase tracking-widest text-sky-600">Alta rápida desde POS</p>
+              <h2 id="pos-customer-title" className="mt-1 text-xl font-black text-slate-900">Registrar cliente</h2>
+            </header>
+            <label className="block space-y-1 text-xs font-bold text-slate-600">
+              DNI / RUC
+              <input value={dni.trim()} readOnly className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 font-black text-slate-800" />
+            </label>
+            <label className="block space-y-1 text-xs font-bold text-slate-600">
+              {dni.trim().length === 11 ? 'Razón social' : 'Nombre completo'}
+              <input
+                autoFocus
+                value={newCustomerName}
+                onChange={(event) => setNewCustomerName(event.target.value)}
+                maxLength={150}
+                required
+                className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-semibold outline-none focus:border-sky-500"
+              />
+            </label>
+            {customerFormError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-xs font-semibold text-red-700">{customerFormError}</p>}
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" onClick={() => setIsCustomerModalOpen(false)} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600">
+                Cancelar
+              </button>
+              <button type="submit" disabled={isSavingCustomer} className="rounded-lg bg-[#24a0ed] px-4 py-2 text-xs font-black text-white disabled:opacity-60">
+                {isSavingCustomer ? 'Guardando…' : 'Guardar cliente'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 };

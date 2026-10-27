@@ -1,22 +1,26 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { ADMIN_ROLES, ALL_ROLES, ROLES, SUPERVISOR_ROLES, getUserRole, hasRole } from '../utils/roles';
 
 const SidebarAdmin = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
   const user = JSON.parse(sessionStorage.getItem('usuario') || '{}');
+  const userRole = getUserRole(user);
+  const isCompanyAdmin = userRole === ROLES.ADMIN_EMPRESA;
 
   const menuItems = [
-    { name: 'Panel General', icon: 'space_dashboard', path: '/admin' },
-    { name: 'Gestión de Usuarios', icon: 'manage_accounts', path: '/admin/usuarios' },
-    { name: 'Configuración', icon: 'settings', path: '/admin/configuracion' },
-  ];
+    { name: 'Panel General', icon: 'space_dashboard', path: '/admin', roles: ADMIN_ROLES },
+    { name: 'Gestión de Usuarios', icon: 'manage_accounts', path: '/admin/usuarios', roles: ADMIN_ROLES },
+    { name: 'Configuración', icon: 'settings', path: '/admin/configuracion', roles: ADMIN_ROLES },
+    { name: 'Cierres de Caja', icon: 'point_of_sale', path: '/cierres-caja', roles: SUPERVISOR_ROLES },
+  ].filter((item) => hasRole(userRole, item.roles));
 
   const moduleAccess = [
-    { name: 'Módulo Grifo', icon: 'local_gas_station', path: '/panel', color: '#00AEEF' },
-    { name: 'Módulo Gimnasio', icon: 'fitness_center', path: '/gimnasio', color: '#8B5CF6' },
-  ];
+    { name: 'Módulo Grifo', icon: 'local_gas_station', path: '/panel', color: '#00AEEF', roles: ALL_ROLES },
+    { name: 'Módulo Gimnasio', icon: 'fitness_center', path: '/gimnasio', color: '#8B5CF6', roles: ALL_ROLES },
+  ].filter((mod) => hasRole(userRole, mod.roles));
 
   const isActive = (path) => location.pathname === path;
 
@@ -33,14 +37,20 @@ const SidebarAdmin = () => {
           <img src="/sistema_grifo-main/frontend/dist/logos/brand_admin.svg" alt="Logo Admin" className="w-full h-full object-contain p-1.5" />
         </div>
         <div>
-          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--color-primary)]">Super Admin</h2>
-          <p className="text-[11px] text-[var(--color-on-surface-variant)] font-bold tracking-tight">Panel de Control General</p>
+          <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--color-primary)]">
+            {isCompanyAdmin ? 'Admin Empresa' : 'Super Admin'}
+          </h2>
+          <p className="text-[11px] text-[var(--color-on-surface-variant)] font-bold tracking-tight">
+            {isCompanyAdmin ? user.razon_social || 'Panel de Empresa' : 'Panel de Control General'}
+          </p>
         </div>
       </div>
 
       {/* Admin navigation */}
       <nav className="flex-1 space-y-1">
-        <p className="px-8 text-[9px] font-black uppercase tracking-[0.3em] text-[var(--color-outline-variant)] mb-3">Administración</p>
+        <p className="px-8 text-[9px] font-black uppercase tracking-[0.3em] text-[var(--color-outline-variant)] mb-3">
+          {isCompanyAdmin ? 'Mi Empresa' : 'Administración'}
+        </p>
         {menuItems.map((item) => (
           <button
             key={item.name}

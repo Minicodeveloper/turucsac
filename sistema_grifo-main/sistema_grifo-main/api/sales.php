@@ -22,6 +22,14 @@ function toPublicUrl(string $absolutePath): string
 
 $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? '';
+$currentRole = strtoupper((string) USER_ROL);
+$supervisorRoles = ['SUPER_ADMIN', 'ADMIN', 'ADMIN_EMPRESA', 'SUPERVISOR'];
+
+if (($method === 'GET' || $method === 'DELETE' || $action === 'delete_batch') && !in_array($currentRole, $supervisorRoles, true)) {
+    http_response_code(403);
+    echo json_encode(["success" => false, "message" => "Tu rol no tiene permiso para consultar o administrar comprobantes."]);
+    exit;
+}
 
 // ==========================================
 // 1. OBTENER VENTAS / COMPROBANTES (GET)

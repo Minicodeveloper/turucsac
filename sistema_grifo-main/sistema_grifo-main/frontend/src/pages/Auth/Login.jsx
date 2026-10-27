@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { authService } from '../../services/api';
+import { getDefaultRoute, getUserRole } from '../../utils/roles';
 
 const Login = () => {
   const [user, setUser] = useState('');
@@ -25,18 +26,7 @@ const Login = () => {
       if (data.success) {
         localStorage.setItem('token', data.token);
         sessionStorage.setItem('usuario', JSON.stringify(data.user));
-
-        // Redirección inteligente según los 4 nuevos roles
-        const userRole = data.user ? data.user.rol : '';
-
-        if (userRole === 'SUPER_ADMIN') {
-          navigate('/admin');
-        } else if (userRole === 'ADMIN_EMPRESA') {
-          navigate('/dashboard');
-        } else {
-          // SUPERVISOR y CAJERO van al selector de módulos
-          navigate('/modulos');
-        }
+        navigate(getDefaultRoute(getUserRole(data.user)), { replace: true });
       } else {
         setError(data.message || 'Autorización denegada');
       }

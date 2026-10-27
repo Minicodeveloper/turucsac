@@ -8,6 +8,12 @@ $database = new Database();
 $db = $database->getConnection();
 
 $method = $_SERVER['REQUEST_METHOD'];
+$empresaId = USER_EMPRESA_ID ? (int) USER_EMPRESA_ID : null;
+if (!$empresaId) {
+    http_response_code(403);
+    echo json_encode(["success" => false, "message" => "Tu usuario no tiene una empresa operativa asignada."]);
+    exit;
+}
 
 if ($method === 'GET') {
     try {
@@ -15,10 +21,11 @@ if ($method === 'GET') {
         $query = "SELECT a.*, s.nombre_completo as socio, s.nro_documento as documento, 
                          DATE_FORMAT(a.fecha_hora, '%h:%i %p') as hora 
                   FROM gym_asistencias a
-                  JOIN gym_socios s ON a.socio_id = s.id
-                  WHERE DATE(a.fecha_hora) = CURDATE()
+                  JOIN gym_socios s ON a.socio_id = s.id AND s.empresa_id = a.empresa_id
+                  WHERE a.empresa_id = :empresa_id AND DATE(a.fecha_hora) = CURDATE()
                   ORDER BY a.fecha_hora DESC";
-        $stmt = $db->query($query);
+        $stmt = $db->prepare($query);
+        $stmt->execute([':empresa_id' => $empresaId]);
         $result = $stmt->fetchAll(PDO::FETCH_ASSOC);
         
         echo json_encode(["success" => true, "data" => $result]);
@@ -39,8 +46,8 @@ if ($method === 'GET') {
 
     try {
         // 1. Buscar socio por DNI y ver su estado/vencimiento
-        $stmt_socio = $db->prepare("SELECT id, nombre_completo, estado, fecha_vencimiento FROM gym_socios WHERE nro_documento = :dni");
-        $stmt_socio->execute([':dni' => $dni]);
+        $stmt_socio = $db->prepare("SELECT id, nombre_completo, estado, fecha_vencimiento FROM gym_socios WHERE nro_documento = :dni AND empresa_id = :empresa_id");
+        $stmt_socio->execute([':dni' => $dni, ':empresa_id' => $empresaId]);
         $socio = $stmt_socio->fetch(PDO::FETCH_ASSOC);
 
         if (!$socio) {
@@ -57,9 +64,10 @@ if ($method === 'GET') {
         }
 
         // 3. Registrar asistencia
-        $query = "INSERT INTO gym_asistencias (socio_id, tipo) VALUES (:sid, :tipo)";
+        $query = "INSERT INTO gym_asistencias (empresa_id, socio_id, tipo) VALUES (:empresa_id, :sid, :tipo)";
         $stmt = $db->prepare($query);
         $stmt->execute([
+            ':empresa_id' => $empresaId,
             ':sid' => $socio['id'],
             ':tipo' => $tipo
         ]);

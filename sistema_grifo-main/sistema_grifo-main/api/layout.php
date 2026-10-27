@@ -3,7 +3,8 @@
 require_once __DIR__ . '/config/headers.php';
 require_once __DIR__ . '/config/auth_middleware.php';
 
-$layout_file = __DIR__ . '/config/layout.json';
+$empresaId = USER_EMPRESA_ID ? (int) USER_EMPRESA_ID : 0;
+$layout_file = __DIR__ . '/config/layout_' . ($empresaId ?: 'global') . '.json';
 
 // Ensure the config directory exists and layout.json is readable/writable
 if (!file_exists(__DIR__ . '/config')) {
@@ -25,7 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Solo administradores pueden cambiar el layout
-    if (defined('USER_ROL') && USER_ROL !== 'admin') {
+    if (!in_array(strtoupper((string) USER_ROL), ['ADMIN', 'SUPER_ADMIN', 'ADMIN_EMPRESA'], true)) {
         http_response_code(403);
         echo json_encode(["success" => false, "message" => "Acceso denegado. Se requiere rol de administrador."]);
         exit;

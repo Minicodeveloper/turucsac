@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import SidebarAdmin from '../../components/SidebarAdmin';
+import { ADMIN_ROLES, ALL_ROLES, ROLES, getUserRole, hasRole } from '../../utils/roles';
 
 const modules = [
   {
@@ -13,6 +14,7 @@ const modules = [
     color: '#00AEEF',
     glow: 'rgba(0,174,239,0.15)',
     stats: ['POS', 'Inventario', 'Clientes', 'Analítica'],
+    roles: ALL_ROLES,
   },
   {
     id: 'gimnasio',
@@ -24,23 +26,40 @@ const modules = [
     color: '#8B5CF6',
     glow: 'rgba(139,92,246,0.15)',
     stats: ['Socios', 'Planes', 'Asistencias', 'Ingresos'],
+    roles: ALL_ROLES,
   },
   {
     id: 'admin',
-    title: 'Gestión de Equipo',
+    title: 'Gestión de Usuarios',
     subtitle: 'Panel Administrativo',
-    description: 'Crea, edita y administra todos los usuarios y accesos del sistema.',
+    description: 'Administra los usuarios y accesos de tu empresa.',
     icon: 'manage_accounts',
     path: '/admin/usuarios',
     color: '#F87171',
     glow: 'rgba(248,113,113,0.15)',
     stats: ['Usuarios', 'Roles', 'Permisos', 'Accesos'],
+    roles: ADMIN_ROLES,
+  },
+  {
+    id: 'configuracion',
+    title: 'Configuración',
+    subtitle: 'Administración de Empresa',
+    description: 'Consulta y actualiza la configuración de tu empresa.',
+    icon: 'settings',
+    path: '/admin/configuracion',
+    color: '#34D399',
+    glow: 'rgba(52,211,153,0.15)',
+    stats: ['Empresa', 'Preferencias', 'Datos'],
+    roles: ADMIN_ROLES,
   },
 ];
 
 const AdminPanel = () => {
   const navigate = useNavigate();
   const user = JSON.parse(sessionStorage.getItem('usuario') || '{}');
+  const userRole = getUserRole(user);
+  const isCompanyAdmin = userRole === ROLES.ADMIN_EMPRESA;
+  const visibleModules = modules.filter((mod) => hasRole(userRole, mod.roles));
 
   return (
     <div className="min-h-screen flex bg-[var(--color-surface)]">
@@ -52,7 +71,9 @@ const AdminPanel = () => {
         <div className="mb-14">
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-[var(--color-primary)]/20 bg-[var(--color-primary)]/10 mb-6">
             <span className="material-symbols-outlined text-[var(--color-primary)] text-sm">shield_person</span>
-            <span className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--color-primary)]">Panel Super Admin</span>
+            <span className="text-[10px] font-black uppercase tracking-[0.3em] text-[var(--color-primary)]">
+              {isCompanyAdmin ? 'Panel de Administrador de Empresa' : 'Panel Super Admin'}
+            </span>
           </div>
           <h1 className="text-6xl font-black tracking-tighter text-[var(--color-on-secondary-fixed)] leading-none mb-3">
             Bienvenido,<br />
@@ -60,12 +81,16 @@ const AdminPanel = () => {
               {user.nombre_completo?.split(' ')[0] || 'Admin'}
             </span>
           </h1>
-          <p className="text-[var(--color-on-surface-variant)] text-lg font-medium">Selecciona una sección para comenzar a gestionar.</p>
+          <p className="text-[var(--color-on-surface-variant)] text-lg font-medium">
+            {isCompanyAdmin
+              ? `Administra ${user.razon_social || 'tu empresa'} y accede a sus módulos.`
+              : 'Selecciona una sección para comenzar a gestionar.'}
+          </p>
         </div>
 
         {/* Module access cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          {modules.map((mod) => (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-8">
+          {visibleModules.map((mod) => (
             <button
               key={mod.id}
               onClick={() => navigate(mod.path)}

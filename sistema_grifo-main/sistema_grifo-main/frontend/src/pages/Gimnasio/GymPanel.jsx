@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../../components/Navbar';
+import { ADMIN_ROLES, ALL_ROLES, SUPERVISOR_ROLES, getUserRole, hasRole } from '../../utils/roles';
 
 const gymModules = [
   {
@@ -11,6 +12,7 @@ const gymModules = [
     badge: null,
     description: 'Registro y membresías',
     shortcut: 'F1',
+    roles: ALL_ROLES,
     theme: {
       accentBg: 'bg-sky-50 text-[#0284c7] border-sky-100 group-hover:bg-[#0284c7] group-hover:text-white',
       borderHover: 'hover:border-[#0284c7] hover:shadow-sky-100',
@@ -24,6 +26,7 @@ const gymModules = [
     badge: null,
     description: 'Tarifas y suscripciones',
     shortcut: 'F2',
+    roles: ADMIN_ROLES,
     theme: {
       accentBg: 'bg-amber-50 text-amber-600 border-amber-100 group-hover:bg-amber-500 group-hover:text-white',
       borderHover: 'hover:border-amber-500 hover:shadow-amber-100',
@@ -37,6 +40,7 @@ const gymModules = [
     badge: { text: 'HOY', color: 'emerald' },
     description: 'Check-in y torniquete',
     shortcut: 'F3',
+    roles: ALL_ROLES,
     theme: {
       accentBg: 'bg-emerald-50 text-emerald-600 border-emerald-100 group-hover:bg-emerald-600 group-hover:text-white',
       borderHover: 'hover:border-emerald-500 hover:shadow-emerald-100',
@@ -50,6 +54,7 @@ const gymModules = [
     badge: null,
     description: 'Staff y entrenadores',
     shortcut: 'F4',
+    roles: SUPERVISOR_ROLES,
     theme: {
       accentBg: 'bg-indigo-50 text-indigo-600 border-indigo-100 group-hover:bg-indigo-600 group-hover:text-white',
       borderHover: 'hover:border-indigo-500 hover:shadow-indigo-100',
@@ -63,6 +68,7 @@ const gymModules = [
     badge: null,
     description: 'Caja gym y pagos',
     shortcut: 'F5',
+    roles: SUPERVISOR_ROLES,
     theme: {
       accentBg: 'bg-teal-50 text-teal-600 border-teal-100 group-hover:bg-teal-600 group-hover:text-white',
       borderHover: 'hover:border-teal-500 hover:shadow-teal-100',
@@ -73,8 +79,10 @@ const gymModules = [
 const GymPanel = () => {
   const navigate = useNavigate();
   const user = JSON.parse(sessionStorage.getItem('usuario') || '{}');
-  const userRole = (user.rol || user.role || 'cajero').toLowerCase();
-  const isAdmin = userRole.includes('admin');
+  const userRole = getUserRole(user);
+  const isAdmin = hasRole(userRole, ADMIN_ROLES);
+  const availableModules = gymModules.filter((module) => hasRole(userRole, module.roles || ALL_ROLES));
+  const preferenceKey = `turu.quick-access.gym.${user.id || userRole}`;
 
   // Detección precisa del nombre del colaborador
   const nombreTrabajador =
@@ -89,38 +97,36 @@ const GymPanel = () => {
     (isAdmin ? 'Administrador' : 'Cajero');
 
   const [isEditMode, setIsEditMode] = useState(false);
-  const [modules, setModules] = useState(gymModules);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [newSection, setNewSection] = useState({ title: '', path: '', icon: '', description: '' });
-
-  const handleAddCustomModule = () => {
-    if (!newSection.title || !newSection.path || !newSection.icon) {
-      alert('Por favor completa los campos principales');
-      return;
+  const [selectedModuleIds, setSelectedModuleIds] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(preferenceKey) || 'null');
+      return Array.isArray(saved) ? saved : availableModules.map((module) => module.id);
+    } catch (error) {
+      console.error('Error al leer los accesos rápidos del gimnasio:', error);
+      return availableModules.map((module) => module.id);
     }
-    const created = {
-      id: newSection.title.toLowerCase().replace(/\s+/g, '-'),
-      title: newSection.title,
-      icon: newSection.icon,
-      path: newSection.path,
-      badge: { text: 'NUEVO', color: 'azure' },
-      description: newSection.description || 'Módulo auxiliar deportivo',
-      shortcut: 'APP',
-      theme: {
-        accentBg: 'bg-purple-50 text-purple-600 border-purple-100 group-hover:bg-purple-600 group-hover:text-white',
-        borderHover: 'hover:border-purple-500 hover:shadow-purple-100',
-      }
-    };
-    setModules([...modules, created]);
-    setIsModalOpen(false);
-    setNewSection({ title: '', path: '', icon: '', description: '' });
-  };
+  });
 
-  const handleDeleteModule = (index, e) => {
-    e.stopPropagation();
-    if (window.confirm(`¿Deseas retirar "${modules[index].title}" del menú rápido?`)) {
-      setModules(modules.filter((_, i) => i !== index));
+  useEffect(() => {
+    const authorizedIds = new Set(
+      gymModules
+        .filter((module) => hasRole(userRole, module.roles || ALL_ROLES))
+        .map((module) => module.id)
+    );
+    const safeSelection = selectedModuleIds.filter((id) => authorizedIds.has(id));
+    try {
+      localStorage.setItem(preferenceKey, JSON.stringify(safeSelection));
+    } catch (error) {
+      console.error('Error al guardar los accesos rápidos del gimnasio:', error);
     }
+  }, [preferenceKey, selectedModuleIds, userRole]);
+
+  const toggleModule = (moduleId) => {
+    setSelectedModuleIds((current) => (
+      current.includes(moduleId)
+        ? current.filter((id) => id !== moduleId)
+        : [...current, moduleId]
+    ));
   };
 
   return (
@@ -184,26 +190,60 @@ const GymPanel = () => {
               <span>Cambiar Módulo</span>
             </button>
 
-            {isAdmin && (
-              <button
-                onClick={() => setIsEditMode(!isEditMode)}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-bold uppercase transition-all cursor-pointer ${
+            <button
+              onClick={() => setIsEditMode(!isEditMode)}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-bold uppercase transition-all cursor-pointer ${
                   isEditMode
                     ? 'bg-amber-500 text-white border-amber-600 shadow-sm'
                     : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
                 }`}
-                title="Configurar accesos"
-              >
-                <span className="material-symbols-outlined text-base">edit</span>
-                <span>{isEditMode ? 'Terminar Edición' : 'Editar Panel'}</span>
-              </button>
-            )}
+              title="Elegir accesos rápidos permitidos para tu perfil"
+            >
+              <span className="material-symbols-outlined text-base">{isEditMode ? 'check' : 'tune'}</span>
+              <span>{isEditMode ? 'Listo' : 'Editar Panel'}</span>
+            </button>
           </div>
         </div>
 
+        {isEditMode && (
+          <section aria-label="Personalizar accesos rápidos del gimnasio" className="mb-6 rounded-2xl border border-sky-100 bg-white p-5 shadow-xs">
+            <div className="mb-4">
+              <h2 className="text-sm font-black uppercase tracking-wide text-slate-800">Accesos permitidos para tu perfil</h2>
+              <p className="mt-1 text-xs text-slate-500">Selecciona los módulos del gimnasio que quieres mostrar. Los cambios se guardan para tu usuario en este dispositivo.</p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+              {availableModules.map((module) => {
+                const isSelected = selectedModuleIds.includes(module.id);
+                return (
+                  <button
+                    key={module.id}
+                    type="button"
+                    aria-pressed={isSelected}
+                    onClick={() => toggleModule(module.id)}
+                    className={`flex items-center gap-3 rounded-xl border p-3 text-left transition-colors ${
+                      isSelected
+                        ? 'border-sky-300 bg-sky-50 text-sky-800'
+                        : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-xl">{module.icon}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[11px] font-black uppercase">{module.title}</span>
+                      <span className="block truncate text-[10px]">{module.description}</span>
+                    </span>
+                    <span className="material-symbols-outlined text-base">{isSelected ? 'check_circle' : 'radio_button_unchecked'}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
         {/* Grilla de accesos directos */}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-          {modules.map((mod, index) => {
+          {availableModules
+            .filter((module) => selectedModuleIds.includes(module.id))
+            .map((mod) => {
             const visual = mod.theme || {
               accentBg: 'bg-sky-50 text-[#0284c7] border-sky-100 group-hover:bg-[#0284c7] group-hover:text-white',
               borderHover: 'hover:border-[#0284c7] hover:shadow-sky-100',
@@ -211,7 +251,7 @@ const GymPanel = () => {
 
             return (
               <div
-                key={mod.id + index}
+                key={mod.id}
                 onClick={() => !isEditMode && navigate(mod.path)}
                 className={`group relative bg-white border border-slate-200/90 rounded-2xl p-5 flex flex-col items-center justify-between text-center cursor-pointer min-h-[190px] shadow-xs transition-all duration-200 hover:-translate-y-1 hover:shadow-lg ${visual.borderHover}`}
               >
@@ -227,17 +267,6 @@ const GymPanel = () => {
                       {mod.badge.text}
                     </span>
                   </div>
-                )}
-
-                {/* Botón eliminar en modo edición */}
-                {isEditMode && (
-                  <button
-                    onClick={(e) => handleDeleteModule(index, e)}
-                    className="absolute top-2 right-2 bg-rose-600 text-white rounded-full p-1.5 hover:bg-rose-700 transition-all z-10 shadow-md cursor-pointer"
-                    title="Eliminar botón"
-                  >
-                    <span className="material-symbols-outlined text-sm">close</span>
-                  </button>
                 )}
 
                 {/* Contenido Central */}
@@ -265,16 +294,6 @@ const GymPanel = () => {
             );
           })}
 
-          {/* Botón Añadir Sección (Visible en Modo Edición) */}
-          {isEditMode && (
-            <div
-              onClick={() => setIsModalOpen(true)}
-              className="border-2 border-dashed border-[#24a0ed]/60 bg-sky-50/50 rounded-2xl p-5 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-sky-100/50 transition-all min-h-[190px]"
-            >
-              <span className="material-symbols-outlined text-[#24a0ed] text-3xl mb-1">add_circle</span>
-              <span className="text-xs font-black text-[#24a0ed] uppercase tracking-wider">Agregar Opción</span>
-            </div>
-          )}
         </div>
 
         {/* Footer temático */}
@@ -285,76 +304,6 @@ const GymPanel = () => {
         </footer>
       </main>
 
-      {/* Modal para añadir sección rápida */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
-          <div className="bg-white p-6 rounded-2xl shadow-xl border border-slate-200 w-full max-w-sm">
-            <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-3">
-              <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Nueva Sección Gym</h3>
-              <button
-                onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 rounded p-1 transition-colors cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-lg">close</span>
-              </button>
-            </div>
-
-            <div className="flex flex-col gap-3">
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Título de Botón</label>
-                <input
-                  value={newSection.title}
-                  onChange={(e) => setNewSection({ ...newSection, title: e.target.value })}
-                  type="text"
-                  placeholder="ej. Rutinas, Locker"
-                  className="w-full text-slate-800 bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs font-bold outline-none focus:border-[#24a0ed] focus:bg-white"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Ruta Destino</label>
-                <input
-                  value={newSection.path}
-                  onChange={(e) => setNewSection({ ...newSection, path: e.target.value })}
-                  type="text"
-                  placeholder="ej. /gimnasio/rutinas"
-                  className="w-full text-slate-800 bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs font-bold outline-none focus:border-[#24a0ed] focus:bg-white"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Ícono (Material Symbol)</label>
-                <input
-                  value={newSection.icon}
-                  onChange={(e) => setNewSection({ ...newSection, icon: e.target.value })}
-                  type="text"
-                  placeholder="ej. timer, locker, fitness_center"
-                  className="w-full text-slate-800 bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs font-bold outline-none focus:border-[#24a0ed] focus:bg-white"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Descripción Breve</label>
-                <input
-                  value={newSection.description}
-                  onChange={(e) => setNewSection({ ...newSection, description: e.target.value })}
-                  type="text"
-                  placeholder="ej. Asignación de casilleros"
-                  className="w-full text-slate-800 bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs font-bold outline-none focus:border-[#24a0ed] focus:bg-white"
-                />
-              </div>
-
-              <button
-                onClick={handleAddCustomModule}
-                className="mt-2 w-full py-2.5 bg-[#24a0ed] hover:bg-sky-600 text-white rounded-lg font-black text-xs uppercase tracking-wider shadow-sm transition-all cursor-pointer flex items-center justify-center gap-1.5"
-              >
-                <span className="material-symbols-outlined text-base">save</span>
-                <span>Guardar Botón</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

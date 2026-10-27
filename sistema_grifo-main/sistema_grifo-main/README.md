@@ -16,6 +16,9 @@ Bienvenido al sistema de gestión operativa para estaciones de servicio (grifos)
    - **Administrador de Empresa**: Dueño del negocio particular; gestiona su configuración, sube su certificado digital y crea supervisores y cajeros.
    - **Supervisor**: Controla turnos, arqueos de caja, auditorías y supervisión operativa.
    - **Cajero / Bombero**: Operador en pista o counter enfocado exclusivamente en ventas rápidas en el POS y registro de asistencias.
+   - El panel permite activar accesos rápidos visualmente según los permisos del perfil; las preferencias se guardan por usuario en el dispositivo.
+   - Todos los roles pueden registrar clientes; cajeros pueden hacerlo directamente desde el POS y supervisores/administradores también pueden corregir sus datos.
+   - El encabezado usa el logo de la empresa cuando está disponible y muestra un logo genérico del sistema si falta o no carga.
 3. **Gestión Dinámica de Certificados Digitales (`.p12`)**:
    - Cada empresa sube su propio archivo de certificado y clave privada directamente desde el panel de **Configuración**. Los comprobantes se firman dinámicamente con la identidad fiscal activa en sesión.
 4. **Módulo de Anulación y Notas de Crédito**:
@@ -34,6 +37,19 @@ Bienvenido al sistema de gestión operativa para estaciones de servicio (grifos)
 
 
 ## 🛠️ Instalación y Configuración
+
+### Actualización Multi-Empresa y Cierres de Caja
+
+Antes de ejecutar la migración, realiza una copia de seguridad de la base de datos y elige el `empresa_id` que recibirá los registros heredados que aún no tienen empresa asignada. La migración no selecciona una empresa por defecto y solo puede ejecutarse desde CLI:
+
+```powershell
+Set-Location C:\xampp\htdocs\Sistema_grifo\api
+C:\xampp\php\php.exe migrate_tenant_cash.php <empresa_id>
+```
+
+La migración agrega `empresa_id` y sus índices/relaciones a las tablas operativas existentes, asigna los datos heredados sin empresa a la empresa indicada y crea los campos del arqueo en `cierres_caja`. Los clientes, combustibles, socios e instructores pasan a tener unicidad por empresa. Ejecuta el script una vez en cada base de datos antes de habilitar el frontend actualizado.
+
+El cajero registra el efectivo contado desde **Cierres de Caja**. El esperado se calcula en el servidor a partir del fondo inicial y las ventas en efectivo de su turno; la justificación es obligatoria si hay diferencia. Supervisores y administradores pueden consultar el historial de su empresa.
 
 ### 1. Requisitos
 - XAMPP (Apache + MySQL).
@@ -59,5 +75,3 @@ Bienvenido al sistema de gestión operativa para estaciones de servicio (grifos)
 
 ---
 *Desarrollado con ❤️ para TURUCSAC ERP.*
-
-

@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { ADMIN_ROLES, ALL_ROLES, SUPERVISOR_ROLES, getUserRole, hasRole } from '../utils/roles';
 
 const Sidebar = () => {
   const navigate = useNavigate();
@@ -8,21 +9,19 @@ const Sidebar = () => {
   // Leer usuario de sesión
 // Leer usuario de sesión y validar rol
   const user = JSON.parse(sessionStorage.getItem('usuario') || '{}');
-  const userRole = (user.rol || user.role || 'cajero').toLowerCase();
-  const isAdmin = userRole.includes('admin');
+  const userRole = getUserRole(user);
 
   const menuItems = [
-    { name: 'Panel de Control', icon: 'dashboard', path: '/panel' },
-    { name: 'Ventas (POS)', icon: 'point_of_sale', path: '/pos' },
-    { name: 'Boletas', icon: 'receipt_long', path: '/boletas' },
-    { name: 'Compras', icon: 'shopping_cart', path: '/compras' },
-    { name: 'Inventario', icon: 'inventory_2', path: '/inventario' },
-    { name: 'Analítica', icon: 'analytics', path: '/dashboard' },
-    // Visible únicamente para Administradores
-    ...(isAdmin ? [{ name: 'Finanzas (Caja/Bancos)', icon: 'account_balance', path: '/finanzas' }] : []),
-    { name: 'Express', icon: 'speed', path: '/express' },
-    { name: 'Conciliación', icon: 'checklist_rtl', path: '/conciliacion' },
-  ];
+    { name: 'Panel de Control', icon: 'dashboard', path: '/panel', roles: ALL_ROLES },
+    { name: 'Ventas (POS)', icon: 'point_of_sale', path: '/pos', roles: ALL_ROLES },
+    { name: 'Boletas', icon: 'receipt_long', path: '/boletas', roles: SUPERVISOR_ROLES },
+    { name: 'Compras', icon: 'shopping_cart', path: '/compras', roles: SUPERVISOR_ROLES },
+    { name: 'Inventario', icon: 'inventory_2', path: '/inventario', roles: SUPERVISOR_ROLES },
+    { name: 'Analítica', icon: 'analytics', path: '/dashboard', roles: SUPERVISOR_ROLES },
+    { name: 'Finanzas (Caja/Bancos)', icon: 'account_balance', path: '/finanzas', roles: ADMIN_ROLES },
+    { name: 'Express', icon: 'speed', path: '/express', roles: ALL_ROLES },
+    { name: 'Cierres de Caja', icon: 'point_of_sale', path: '/cierres-caja', roles: ALL_ROLES },
+  ].filter((item) => hasRole(userRole, item.roles));
 
   return (
     <aside className="hidden md:flex flex-col h-screen w-60 bg-white fixed left-0 top-0 z-40 border-r border-slate-200 text-slate-700 shadow-sm">

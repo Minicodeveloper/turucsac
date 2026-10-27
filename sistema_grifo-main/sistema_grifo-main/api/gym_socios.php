@@ -8,21 +8,30 @@ $database = new Database();
 $db = $database->getConnection();
 
 $method = $_SERVER['REQUEST_METHOD'];
+$empresaId = USER_EMPRESA_ID ? (int) USER_EMPRESA_ID : null;
+if (!$empresaId) {
+    http_response_code(403);
+    echo json_encode(["success" => false, "message" => "Tu usuario no tiene una empresa operativa asignada."]);
+    exit;
+}
 
 if ($method === 'GET') {
     $search = $_GET['search'] ?? null;
     try {
         $query = "SELECT s.*, p.nombre as plan_nombre, p.duracion_dias, p.precio as plan_precio
                   FROM gym_socios s 
-                  LEFT JOIN gym_planes p ON s.plan_id = p.id";
+                  LEFT JOIN gym_planes p ON s.plan_id = p.id AND p.empresa_id = s.empresa_id
+                  WHERE s.empresa_id = :empresa_id";
         
         if ($search) {
-            $query .= " WHERE s.nro_documento LIKE :term OR s.nombre_completo LIKE :term";
+            $query .= " AND (s.nro_documento LIKE :term OR s.nombre_completo LIKE :term)";
+            $query .= " ORDER BY s.created_at DESC";
             $stmt = $db->prepare($query);
-            $stmt->execute([':term' => "%$search%"]);
+            $stmt->execute([':empresa_id' => $empresaId, ':term' => "%$search%"]);
         } else {
             $query .= " ORDER BY s.created_at DESC";
-            $stmt = $db->query($query);
+            $stmt = $db->prepare($query);
+            $stmt->execute([':empresa_id' => $empresaId]);
         }
 
         $result = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -58,8 +67,8 @@ if ($method === 'GET') {
 
     try {
         // 1. Obtener duración del plan
-        $stmt_plan = $db->prepare("SELECT duracion_dias FROM gym_planes WHERE id = :id");
-        $stmt_plan->execute([':id' => $plan_id]);
+        $stmt_plan = $db->prepare("SELECT duracion_dias FROM gym_planes WHERE id = :id AND empresa_id = :empresa_id");
+        $stmt_plan->execute([':id' => $plan_id, ':empresa_id' => $empresaId]);
         $plan = $stmt_plan->fetch(PDO::FETCH_ASSOC);
 
         if (!$plan) {
@@ -71,10 +80,11 @@ if ($method === 'GET') {
         $vencimiento = date('Y-m-d', strtotime($fecha_inicio . " + $duracion days"));
 
         // 3. Insertar socio
-        $query = "INSERT INTO gym_socios (nro_documento, nombre_completo, plan_id, fecha_inicio, fecha_vencimiento, estado) 
-                  VALUES (:dni, :nom, :pid, :ini, :ven, 'ACTIVO')";
+        $query = "INSERT INTO gym_socios (empresa_id, nro_documento, nombre_completo, plan_id, fecha_inicio, fecha_vencimiento, estado) 
+                  VALUES (:empresa_id, :dni, :nom, :pid, :ini, :ven, 'ACTIVO')";
         $stmt = $db->prepare($query);
         $stmt->execute([
+            ':empresa_id' => $empresaId,
             ':dni' => $dni,
             ':nom' => $nom,
             ':pid' => $plan_id,
@@ -98,17 +108,25 @@ if ($method === 'GET') {
     }
 
     try {
+        $planCheck = $db->prepare('SELECT COUNT(*) FROM gym_planes WHERE id = :plan_id AND empresa_id = :empresa_id');
+        $planCheck->execute([':plan_id' => $input['plan_id'], ':empresa_id' => $empresaId]);
+        if ((int) $planCheck->fetchColumn() === 0) {
+            http_response_code(404);
+            echo json_encode(["success" => false, "message" => "El plan seleccionado no pertenece a tu empresa."]);
+            exit;
+        }
         $query = "UPDATE gym_socios SET 
                   nombre_completo = :nom, 
                   plan_id = :pid, 
                   estado = :est 
-                  WHERE id = :id";
+                  WHERE id = :id AND empresa_id = :empresa_id";
         $stmt = $db->prepare($query);
         $stmt->execute([
             ':nom' => $input['nombre_completo'],
             ':pid' => $input['plan_id'],
             ':est' => $input['estado'] ?? 'ACTIVO',
-            ':id' => $id
+            ':id' => $id,
+            ':empresa_id' => $empresaId
         ]);
         echo json_encode(["success" => true, "message" => "Socio actualizado"]);
     } catch (PDOException $e) {
@@ -124,8 +142,8 @@ if ($method === 'GET') {
     }
 
     try {
-        $stmt = $db->prepare("DELETE FROM gym_socios WHERE id = :id");
-        $stmt->execute([':id' => $id]);
+        $stmt = $db->prepare("DELETE FROM gym_socios WHERE id = :id AND empresa_id = :empresa_id");
+        $stmt->execute([':id' => $id, ':empresa_id' => $empresaId]);
         echo json_encode(["success" => true, "message" => "Socio eliminado"]);
     } catch (PDOException $e) {
         http_response_code(500);

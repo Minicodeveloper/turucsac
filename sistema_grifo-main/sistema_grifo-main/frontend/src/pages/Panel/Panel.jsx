@@ -1,19 +1,42 @@
 import React, { useState, useEffect } from 'react';
 import Navbar from '../../components/Navbar';
-import { layoutService } from '../../services/api';
 import { useNavigate } from 'react-router-dom';
+import { ADMIN_ROLES, ALL_ROLES, SUPERVISOR_ROLES, getUserRole, hasRole } from '../../utils/roles';
+
+const QUICK_ACCESS_OPTIONS = [
+  { id: 'pos', title: 'Punto de Venta', desc: 'Ventas y comprobantes', icon: 'point_of_sale', path: '/pos', roles: ALL_ROLES },
+  { id: 'clientes', title: 'Clientes', desc: 'Directorio de clientes', icon: 'group', path: '/clientes', roles: ALL_ROLES },
+  { id: 'cierres', title: 'Cierres de Caja', desc: 'Arqueo e historial', icon: 'account_balance_wallet', path: '/cierres-caja', roles: ALL_ROLES },
+  { id: 'inventario', title: 'Inventario', desc: 'Stock y movimientos', icon: 'inventory_2', path: '/inventario', roles: SUPERVISOR_ROLES },
+  { id: 'compras', title: 'Compras', desc: 'Abastecimiento', icon: 'local_shipping', path: '/compras', roles: SUPERVISOR_ROLES },
+  { id: 'boletas', title: 'Boletas', desc: 'Historial de comprobantes', icon: 'receipt_long', path: '/boletas', roles: SUPERVISOR_ROLES },
+  { id: 'dashboard', title: 'Analítica', desc: 'Indicadores de operación', icon: 'analytics', path: '/dashboard', roles: SUPERVISOR_ROLES },
+  { id: 'finanzas', title: 'Finanzas', desc: 'Cuentas y reportes', icon: 'account_balance', path: '/finanzas', roles: ADMIN_ROLES },
+  { id: 'configuracion', title: 'Configuración', desc: 'Administración de empresa', icon: 'settings', path: '/admin/configuracion', roles: ADMIN_ROLES },
+  { id: 'gimnasio', title: 'Gimnasio', desc: 'Gestión del gimnasio', icon: 'fitness_center', path: '/gimnasio', roles: ALL_ROLES },
+];
 
 const Panel = () => {
-  const [layout, setLayout] = useState([]);
   const [isEditMode, setIsEditMode] = useState(false);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [newSection, setNewSection] = useState({ id: '', title: '', icon: '' });
 
   // 1. Lectura de datos de sesión activa
   const user = JSON.parse(sessionStorage.getItem('usuario') || '{}');
-  const userRole = (user.rol || user.role || 'cajero').toLowerCase();
-  const isAdmin = userRole.includes('admin');
+  const userRole = getUserRole(user);
+  const isAdmin = hasRole(userRole, ADMIN_ROLES);
   const navigate = useNavigate();
+  const availableSections = QUICK_ACCESS_OPTIONS.filter((section) => hasRole(userRole, section.roles));
+  const preferenceKey = `turu.quick-access.${user.id || userRole}`;
+  const [selectedSectionIds, setSelectedSectionIds] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(preferenceKey) || 'null');
+      return Array.isArray(saved)
+        ? saved
+        : availableSections.map((section) => section.id);
+    } catch (error) {
+      console.error('Error al leer los accesos rápidos guardados:', error);
+      return availableSections.map((section) => section.id);
+    }
+  });
 
   // 2. Detección precisa del nombre real del trabajador sin forzar ADMIN por defecto
   const nombreTrabajador =
@@ -28,64 +51,30 @@ const Panel = () => {
     (isAdmin ? 'Administrador' : 'Cajero');
 
   useEffect(() => {
-    loadLayout();
-  }, []);
-
-  const loadLayout = async () => {
+    const authorizedIds = new Set(
+      QUICK_ACCESS_OPTIONS
+        .filter((section) => hasRole(userRole, section.roles))
+        .map((section) => section.id)
+    );
+    const safeSelection = selectedSectionIds.filter((id) => authorizedIds.has(id));
     try {
-      const data = await layoutService.getLayout();
-      if (data.success && Array.isArray(data.data)) {
-        setLayout(data.data);
-      }
+      localStorage.setItem(preferenceKey, JSON.stringify(safeSelection));
     } catch (error) {
-      console.error('Error cargando layout', error);
+      console.error('Error al guardar los accesos rápidos:', error);
     }
-  };
-
-  const saveLayout = async (updatedLayout) => {
-    try {
-      await layoutService.saveLayout(updatedLayout);
-    } catch (error) {
-      console.error('Error guardando layout', error);
-      alert('Error al guardar cambios en el servidor');
-    }
-  };
-
-  const handleDelete = (index, e) => {
-    e.stopPropagation();
-    if (window.confirm(`¿Estás seguro de eliminar el módulo "${layout[index].title}"?`)) {
-      const updated = layout.filter((_, i) => i !== index);
-      setLayout(updated);
-      saveLayout(updated);
-    }
-  };
-
-  const handleAddSection = () => {
-    if (!newSection.id || !newSection.title || !newSection.icon) {
-      alert('Por favor completa todos los campos');
-      return;
-    }
-    const updated = [...layout, { ...newSection, badge: { text: 'NUEVO', color: 'tertiary' } }];
-    setLayout(updated);
-    saveLayout(updated);
-    setIsModalOpen(false);
-    setNewSection({ id: '', title: '', icon: '' });
-  };
+  }, [preferenceKey, selectedSectionIds, userRole]);
 
   const handleCardClick = (section) => {
     if (isEditMode) return;
-    const id = (section.id || '').toLowerCase();
-    const title = (section.title || '').toLowerCase();
+    navigate(section.path);
+  };
 
-    if (id === 'pos' || title.includes('venta')) navigate('/pos');
-    else if (id === 'inventario' || title.includes('inventario')) navigate('/inventario');
-    else if (id === 'compras' || id === 'abastecimiento' || title.includes('abastecimiento')) navigate('/compras');
-    else if (id === 'finanzas' || title.includes('cuentas')) navigate('/finanzas');
-    else if (id === 'clientes' || title.includes('base clientes')) navigate('/clientes');
-    else if (id === 'configuracion' || title.includes('configuraci')) navigate('/admin/configuracion');
-    else if (id === 'admin') navigate('/admin/usuarios');
-    else if (id === 'gimnasio') navigate('/gimnasio');
-    else alert(`Módulo "${section.title}" — Próximamente disponible`);
+  const toggleSection = (sectionId) => {
+    setSelectedSectionIds((current) => (
+      current.includes(sectionId)
+        ? current.filter((id) => id !== sectionId)
+        : [...current, sectionId]
+    ));
   };
 
   // Asignación de diseño operativo rápido según el tipo de módulo
@@ -220,37 +209,65 @@ const Panel = () => {
               <span>Cambiar Módulo</span>
             </button>
 
-            {isAdmin && (
-              <button
-                onClick={() => setIsEditMode(!isEditMode)}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-bold uppercase transition-all cursor-pointer ${
+            <button
+              onClick={() => setIsEditMode(!isEditMode)}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-bold uppercase transition-all cursor-pointer ${
                   isEditMode
                     ? 'bg-amber-500 text-white border-amber-600 shadow-sm'
                     : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
                 }`}
-                title="Configurar orden o añadir botones"
-              >
-                <span className="material-symbols-outlined text-base">edit</span>
-                <span>{isEditMode ? 'Terminar Edición' : 'Editar Panel'}</span>
-              </button>
-            )}
+              title="Elegir los accesos rápidos de tu perfil"
+            >
+              <span className="material-symbols-outlined text-base">{isEditMode ? 'check' : 'tune'}</span>
+              <span>{isEditMode ? 'Listo' : 'Editar Panel'}</span>
+            </button>
           </div>
         </div>
 
+        {isEditMode && (
+          <section aria-label="Personalizar accesos rápidos" className="mb-6 rounded-2xl border border-sky-100 bg-white p-5 shadow-xs">
+            <div className="mb-4">
+              <h2 className="text-sm font-black uppercase tracking-wide text-slate-800">Accesos permitidos para tu perfil</h2>
+              <p className="mt-1 text-xs text-slate-500">Activa o desactiva los módulos que quieres ver. La selección se guarda para tu usuario en este dispositivo.</p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+              {availableSections.map((section) => {
+                const isSelected = selectedSectionIds.includes(section.id);
+                return (
+                  <button
+                    key={section.id}
+                    type="button"
+                    aria-pressed={isSelected}
+                    onClick={() => toggleSection(section.id)}
+                    className={`flex items-center gap-3 rounded-xl border p-3 text-left transition-colors ${
+                      isSelected
+                        ? 'border-sky-300 bg-sky-50 text-sky-800'
+                        : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-xl">{section.icon}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[11px] font-black uppercase">{section.title}</span>
+                      <span className="block truncate text-[10px]">{section.desc}</span>
+                    </span>
+                    <span className="material-symbols-outlined text-base">{isSelected ? 'check_circle' : 'radio_button_unchecked'}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
         {/* Cuadrícula de Botones Operativos Rápidos */}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-          {layout
-            .filter((section) => {
-              if (isAdmin) return true;
-              const restricted = ['equipo', 'configuracion', 'planillas', 'contabilidad', 'sire', 'finanzas', 'lotes'];
-              return !restricted.includes(section.id.toLowerCase());
-            })
-            .map((section, index) => {
+          {availableSections
+            .filter((section) => selectedSectionIds.includes(section.id))
+            .map((section) => {
               const visual = getModuleVisuals(section);
 
               return (
                 <div
-                  key={section.id + index}
+                  key={section.id}
                   onClick={() => handleCardClick(section)}
                   className={`group relative bg-white border border-slate-200/90 rounded-2xl p-5 flex flex-col items-center justify-between text-center cursor-pointer min-h-[190px] shadow-xs transition-all duration-200 hover:-translate-y-1 hover:shadow-lg ${visual.borderHover}`}
                 >
@@ -258,26 +275,6 @@ const Panel = () => {
                   <span className="absolute top-3 left-3 text-[10px] font-mono font-black text-slate-300 group-hover:text-slate-500 transition-colors">
                     {visual.shortcutTag}
                   </span>
-
-                  {/* Badge en caso de tenerlo */}
-                  {section.badge && (
-                    <div className="absolute top-3 right-3">
-                      <span className="bg-[#24a0ed] text-white text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider">
-                        {section.badge.text}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Botón de eliminación en modo edición */}
-                  {isEditMode && (
-                    <button
-                      onClick={(e) => handleDelete(index, e)}
-                      className="absolute top-2 right-2 bg-rose-600 text-white rounded-full p-1.5 hover:bg-rose-700 transition-all z-10 shadow-md cursor-pointer"
-                      title="Eliminar botón"
-                    >
-                      <span className="material-symbols-outlined text-sm">close</span>
-                    </button>
-                  )}
 
                   {/* Icono central de gran tamaño */}
                   <div className="my-auto flex flex-col items-center">
@@ -305,79 +302,9 @@ const Panel = () => {
                 </div>
               );
             })}
-
-          {/* Tarjeta de añadir módulo en modo edición */}
-          {isEditMode && (
-            <div
-              onClick={() => setIsModalOpen(true)}
-              className="border-2 border-dashed border-[#24a0ed]/60 bg-sky-50/50 rounded-2xl p-5 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-sky-100/50 transition-all min-h-[190px]"
-            >
-              <span className="material-symbols-outlined text-[#24a0ed] text-3xl mb-1">add_circle</span>
-              <span className="text-xs font-black text-[#24a0ed] uppercase tracking-wider">Agregar Sección</span>
-            </div>
-          )}
         </div>
       </main>
 
-      {/* Modal para Agregar Sección */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
-          <div className="bg-white p-6 rounded-2xl shadow-xl border border-slate-200 w-full max-w-sm">
-            <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-3">
-              <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Nueva Sección Rápida</h3>
-              <button
-                onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 rounded p-1 transition-colors cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-lg">close</span>
-              </button>
-            </div>
-
-            <div className="flex flex-col gap-3">
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">ID / Ruta</label>
-                <input
-                  value={newSection.id}
-                  onChange={(e) => setNewSection({ ...newSection, id: e.target.value })}
-                  type="text"
-                  placeholder="ej. pos, inventario, compras"
-                  className="w-full text-slate-800 bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs font-bold outline-none focus:border-[#24a0ed] focus:bg-white"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Título de Botón</label>
-                <input
-                  value={newSection.title}
-                  onChange={(e) => setNewSection({ ...newSection, title: e.target.value })}
-                  type="text"
-                  placeholder="ej. Ventas Pista"
-                  className="w-full text-slate-800 bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs font-bold outline-none focus:border-[#24a0ed] focus:bg-white"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Nombre del Ícono (Material)</label>
-                <input
-                  value={newSection.icon}
-                  onChange={(e) => setNewSection({ ...newSection, icon: e.target.value })}
-                  type="text"
-                  placeholder="ej. point_of_sale, local_gas_station"
-                  className="w-full text-slate-800 bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs font-bold outline-none focus:border-[#24a0ed] focus:bg-white"
-                />
-              </div>
-
-              <button
-                onClick={handleAddSection}
-                className="mt-2 w-full py-2.5 bg-[#24a0ed] hover:bg-sky-600 text-white rounded-lg font-black text-xs uppercase tracking-wider shadow-sm transition-all cursor-pointer flex items-center justify-center gap-1.5"
-              >
-                <span className="material-symbols-outlined text-base">save</span>
-                <span>Guardar Sección</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { ROLES, getUserRole } from '../../utils/roles';
 
 const modules = [
   {
@@ -31,11 +32,12 @@ const modules = [
 const ModuleSelector = () => {
   const navigate = useNavigate();
   const user = JSON.parse(sessionStorage.getItem('usuario') || '{}');
+  const userRole = getUserRole(user);
 
   // Si no hay sesión, redirige al login
   useEffect(() => {
     if (!user.id) navigate('/login');
-  }, []);
+  }, [navigate, user.id]);
 
   const handleSelect = (mod) => {
     sessionStorage.setItem('modulo_activo', mod.id);
@@ -63,7 +65,13 @@ const ModuleSelector = () => {
           <div className="text-right">
             <p className="text-sm font-black text-white tracking-tight uppercase">{user.nombre_completo || 'Usuario'}</p>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-              {user.rol === 'admin' ? 'Administrador' : user.rol === 'supervisor' ? 'Supervisor' : 'Cajero'}
+              {userRole === ROLES.SUPER_ADMIN
+                ? 'Super Admin'
+                : userRole === ROLES.ADMIN_EMPRESA
+                  ? 'Administrador de Empresa'
+                  : userRole === ROLES.SUPERVISOR
+                    ? 'Supervisor'
+                    : 'Cajero'}
             </p>
           </div>
           <button

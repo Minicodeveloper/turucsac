@@ -8,10 +8,23 @@ $database = new Database();
 $db = $database->getConnection();
 
 $method = $_SERVER['REQUEST_METHOD'];
+$empresaId = USER_EMPRESA_ID ? (int) USER_EMPRESA_ID : null;
+$role = strtoupper((string) USER_ROL);
+if (!in_array($role, ['SUPER_ADMIN', 'ADMIN', 'ADMIN_EMPRESA', 'SUPERVISOR'], true)) {
+    http_response_code(403);
+    echo json_encode(["success" => false, "message" => "Tu rol no tiene permiso para gestionar instructores."]);
+    exit;
+}
+if (!$empresaId) {
+    http_response_code(403);
+    echo json_encode(["success" => false, "message" => "Tu usuario no tiene una empresa operativa asignada."]);
+    exit;
+}
 
 if ($method === 'GET') {
     try {
-        $stmt = $db->query("SELECT * FROM gym_instructores ORDER BY nombre_completo ASC");
+        $stmt = $db->prepare("SELECT * FROM gym_instructores WHERE empresa_id = :empresa_id ORDER BY nombre_completo ASC");
+        $stmt->execute([':empresa_id' => $empresaId]);
         $result = $stmt->fetchAll(PDO::FETCH_ASSOC);
         
         // Formatear para el frontend (activo boolean)
@@ -41,10 +54,11 @@ if ($method === 'GET') {
     }
 
     try {
-        $query = "INSERT INTO gym_instructores (nro_documento, nombre_completo, especialidad, turno, telefono, email, estado) 
-                  VALUES (:dni, :nom, :esp, :tur, :tel, :ema, 1)";
+        $query = "INSERT INTO gym_instructores (empresa_id, nro_documento, nombre_completo, especialidad, turno, telefono, email, estado) 
+                  VALUES (:empresa_id, :dni, :nom, :esp, :tur, :tel, :ema, 1)";
         $stmt = $db->prepare($query);
         $stmt->execute([
+            ':empresa_id' => $empresaId,
             ':dni' => $dni,
             ':nom' => $nom,
             ':esp' => $esp,
@@ -76,7 +90,7 @@ if ($method === 'GET') {
                   telefono = :tel, 
                   email = :ema, 
                   estado = :est 
-                  WHERE id = :id";
+                  WHERE id = :id AND empresa_id = :empresa_id";
         $stmt = $db->prepare($query);
         $stmt->execute([
             ':nom' => $input['nombre_completo'],
@@ -86,7 +100,8 @@ if ($method === 'GET') {
             ':tel' => $input['telefono'],
             ':ema' => $input['email'],
             ':est' => isset($input['activo']) ? ($input['activo'] ? 1 : 0) : ($input['estado'] ?? 1),
-            ':id' => $id
+            ':id' => $id,
+            ':empresa_id' => $empresaId
         ]);
         echo json_encode(["success" => true, "message" => "Instructor actualizado"]);
     } catch (PDOException $e) {
@@ -103,8 +118,8 @@ if ($method === 'GET') {
     }
 
     try {
-        $stmt = $db->prepare("UPDATE gym_instructores SET estado = 0 WHERE id = :id");
-        $stmt->execute([':id' => $id]);
+        $stmt = $db->prepare("UPDATE gym_instructores SET estado = 0 WHERE id = :id AND empresa_id = :empresa_id");
+        $stmt->execute([':id' => $id, ':empresa_id' => $empresaId]);
         echo json_encode(["success" => true, "message" => "Instructor marcado como inactivo"]);
     } catch (PDOException $e) {
         http_response_code(500);

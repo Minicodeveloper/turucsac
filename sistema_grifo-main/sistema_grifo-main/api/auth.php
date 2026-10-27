@@ -16,9 +16,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!empty($nro_documento) && !empty($password)) {
         try {
+            $logoColumn = $db->query(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'empresas'
+                   AND COLUMN_NAME = 'logo_path'"
+            )->fetchColumn();
+            $logoSelect = (int) $logoColumn > 0 ? 'e.logo_path' : 'NULL AS logo_path';
+
             // Traemos los datos del usuario e información de su empresa vinculada
-            $query = "SELECT u.id, u.nro_documento, u.password_hash, u.nombre_completo, u.rol, u.empresa_id, 
-                             e.razon_social, e.estado AS empresa_estado 
+            $query = "SELECT u.id, u.nro_documento, u.password_hash, u.nombre_completo, u.rol, u.empresa_id,
+                             e.razon_social, {$logoSelect}, e.estado AS empresa_estado
                       FROM usuarios u 
                       LEFT JOIN empresas e ON u.empresa_id = e.id 
                       WHERE u.nro_documento = :dni LIMIT 1";
@@ -85,7 +92,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             "rol" => $rolUsuario,
                             "role" => $rolUsuario,
                             "empresa_id" => $row['empresa_id'],
-                            "razon_social" => $row['razon_social'] ?? 'TURUCSAC Global'
+                            "razon_social" => $row['razon_social'] ?? 'TURUCSAC Global',
+                            "logo_path" => $row['logo_path'] ?? null
                         ],
                         "message" => "Acceso concedido"
                     ]);

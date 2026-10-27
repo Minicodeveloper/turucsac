@@ -1,23 +1,19 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { ROLES, getUserRole } from '../utils/roles';
 
 const Navbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Determine logo based on context
-  const getContextLogo = () => {
-    const path = location.pathname;
-    if (path.includes('/gimnasio')) return '/sistema_grifo-main/frontend/dist/logos/brand_gym.svg';
-    if (path.includes('/admin')) return '/sistema_grifo-main/frontend/dist/logos/brand_admin.svg';
-    return '/sistema_grifo-main/frontend/dist/logos/brand_grifo.svg';
-  };
-
   // Leer datos del usuario directamente desde la sesión
   const user = JSON.parse(sessionStorage.getItem('usuario') || '{}');
-  const userRole = user.rol || 'CAJERO';
+  const userRole = getUserRole(user) || ROLES.CAJERO;
   const userName = user.nombre_completo || user.name || 'Usuario';
   const empresaNombre = user.razon_social || 'TURUCSAC';
+  const companyLogo = user.logo_path
+    ? `/logos/${encodeURIComponent(user.logo_path)}`
+    : '/assets/default-logo.png';
   
   // Detectar módulo basado en la URL para mayor robustez
   const isGymPath = location.pathname.startsWith('/gimnasio');
@@ -26,13 +22,13 @@ const Navbar = () => {
   // Helper para formatear la etiqueta del rol correctamente
   const getRoleLabel = (role) => {
     switch (role) {
-      case 'SUPER_ADMIN':
+      case ROLES.SUPER_ADMIN:
         return 'Super Admin';
-      case 'ADMIN_EMPRESA':
+      case ROLES.ADMIN_EMPRESA:
         return 'Admin Empresa';
-      case 'SUPERVISOR':
+      case ROLES.SUPERVISOR:
         return 'Supervisor';
-      case 'CAJERO':
+      case ROLES.CAJERO:
         return 'Cajero / Bombero';
       default:
         return role;
@@ -45,7 +41,7 @@ const Navbar = () => {
   };
 
   const handlePanelClick = () => {
-    if (userRole === 'SUPER_ADMIN') {
+    if (userRole === ROLES.SUPER_ADMIN || userRole === ROLES.ADMIN_EMPRESA) {
       navigate('/admin');
     } else if (moduloActivo === 'gimnasio') {
       navigate('/gimnasio');
@@ -63,7 +59,15 @@ const Navbar = () => {
               {location.pathname.includes('/gimnasio') ? (
                 <i className="fi fi-sr-gym text-2xl text-primary-container"></i>
               ) : (
-                <img src={getContextLogo()} alt="Logo" className="w-full h-full object-contain" />
+                <img
+                  src={companyLogo}
+                  alt="Logo Empresa"
+                  className="w-full h-full object-contain"
+                  onError={(event) => {
+                    if (event.currentTarget.src.endsWith('/assets/default-logo.png')) return;
+                    event.currentTarget.src = '/assets/default-logo.png';
+                  }}
+                />
               )}
             </div>
             <div className="flex flex-col">
@@ -83,9 +87,15 @@ const Navbar = () => {
             >
               {moduloActivo === 'gimnasio' ? 'Gestión Socios' : 'Operaciones (POS)'}
             </button>
+            <button
+              onClick={() => navigate('/cierres-caja')}
+              className="text-on-surface-variant hover:text-on-secondary-fixed py-5 transition-colors"
+            >
+              Cierres de Caja
+            </button>
             
             {/* Opciones visibles para Supervisor, Admin Empresa y Super Admin */}
-            {['SUPER_ADMIN', 'ADMIN_EMPRESA', 'SUPERVISOR'].includes(userRole) && (
+            {[ROLES.SUPER_ADMIN, ROLES.ADMIN_EMPRESA, ROLES.SUPERVISOR].includes(userRole) && (
               <button 
                 onClick={() => navigate(moduloActivo === 'gimnasio' ? '/gimnasio/ingresos' : '/dashboard')} 
                 className="text-on-surface-variant hover:text-on-secondary-fixed py-5 transition-colors"
@@ -101,10 +111,10 @@ const Navbar = () => {
           </button>
 
           {/* Botón de panel admin de empresa / plataforma */}
-          {['SUPER_ADMIN', 'ADMIN_EMPRESA'].includes(userRole) && (
+          {[ROLES.SUPER_ADMIN, ROLES.ADMIN_EMPRESA].includes(userRole) && (
             <button 
               id="btnConfiguracion" 
-              onClick={() => navigate(userRole === 'SUPER_ADMIN' ? '/admin' : '/admin/configuracion')} 
+              onClick={() => navigate(userRole === ROLES.SUPER_ADMIN ? '/admin' : '/admin/configuracion')}
               className="p-2 text-on-surface-variant hover:bg-surface-container rounded-full transition-colors active:scale-95 duration-200" 
               title="Configuración de Empresa / Sistema"
             >

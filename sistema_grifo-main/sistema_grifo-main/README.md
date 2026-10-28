@@ -16,9 +16,9 @@ Bienvenido al sistema de gestión operativa para estaciones de servicio (grifos)
    - **Administrador de Empresa**: Dueño del negocio particular; gestiona su configuración, sube su certificado digital y crea supervisores y cajeros.
    - **Supervisor**: Controla turnos, arqueos de caja, auditorías y supervisión operativa.
    - **Cajero / Bombero**: Operador en pista o counter enfocado exclusivamente en ventas rápidas en el POS y registro de asistencias.
-   - El panel permite activar accesos rápidos visualmente según los permisos del perfil; las preferencias se guardan por usuario en el dispositivo.
-   - Todos los roles pueden registrar clientes; cajeros pueden hacerlo directamente desde el POS y supervisores/administradores también pueden corregir sus datos.
-   - El encabezado usa el logo de la empresa cuando está disponible y muestra un logo genérico del sistema si falta o no carga.
+   - **Paneles Visuales Intuitivos**: El panel permite activar o desactivar accesos rápidos de forma visual mediante la opción de "Editar", limitándose a los permisos permitidos para cada perfil; las preferencias se guardan de forma limpia por usuario en el dispositivo.
+   - **Gestión Ágil de Clientes**: Todos los roles operativos (cajeros, supervisores y administradores) pueden registrar clientes nuevos (por DNI o RUC con su razón social) directamente desde el POS o el módulo de clientes, asegurando que aparezcan de forma inmediata en las boletas y facturas emitidas.
+   - **Logotipo Corporativo Dinámico**: La interfaz carga automáticamente el logotipo personalizado de la empresa activa; si no cuenta con uno o la imagen falla al cargar, muestra por defecto un isotipo genérico profesional del sistema.
 3. **Gestión Dinámica de Certificados Digitales (`.p12`)**:
    - Cada empresa sube su propio archivo de certificado y clave privada directamente desde el panel de **Configuración**. Los comprobantes se firman dinámicamente con la identidad fiscal activa en sesión.
 4. **Módulo de Anulación y Notas de Crédito**:
@@ -45,7 +45,7 @@ Antes de ejecutar la migración, realiza una copia de seguridad de la base de da
 ```powershell
 Set-Location C:\xampp\htdocs\Sistema_grifo\api
 C:\xampp\php\php.exe migrate_tenant_cash.php <empresa_id>
-```
+
 
 La migración agrega `empresa_id` y sus índices/relaciones a las tablas operativas existentes, asigna los datos heredados sin empresa a la empresa indicada y crea los campos del arqueo en `cierres_caja`. Los clientes, combustibles, socios e instructores pasan a tener unicidad por empresa. Ejecuta el script una vez en cada base de datos antes de habilitar el frontend actualizado.
 
@@ -75,3 +75,4 @@ El cajero registra el efectivo contado desde **Cierres de Caja**. El esperado se
 
 ---
 *Desarrollado con ❤️ para TURUCSAC ERP.*
+
